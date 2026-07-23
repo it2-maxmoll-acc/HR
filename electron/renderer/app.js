@@ -393,6 +393,7 @@ function renderMessage(msg) {
   node.querySelector(".text").textContent = msg.text;
   els.log.appendChild(node);
   els.log.scrollTop = els.log.scrollHeight;
+  toggleDownload();
 }
 
 function updateMessage(msg) {
@@ -401,11 +402,13 @@ function updateMessage(msg) {
   const t = node.querySelector(".text");
   t.textContent = msg.text;
   t.classList.toggle("pending", msg.pending);
+  toggleDownload();
 }
 
 function removeMessage(id) {
   const node = els.log.querySelector(`[data-id="${id}"]`);
   node?.remove();
+  toggleDownload();
 }
 
 function fmtTs(ms) {
