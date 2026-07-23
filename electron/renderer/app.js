@@ -16,6 +16,7 @@ const els = {
   start: document.getElementById("start"),
   stop: document.getElementById("stop"),
   save: document.getElementById("save"),
+  download: document.getElementById("download"),
   banner: document.getElementById("banner"),
   log: document.getElementById("log"),
 };
@@ -66,6 +67,7 @@ navigator.mediaDevices.addEventListener?.("devicechange", refreshDevices);
 els.start.addEventListener("click", () => start().catch(handleFatal));
 els.stop.addEventListener("click", () => stop().catch(handleFatal));
 els.save.addEventListener("click", () => saveTranscript(false));
+els.download.addEventListener("click", () => saveTranscript(false));
 
 function handleFatal(e) {
   console.error(e);
@@ -79,6 +81,13 @@ function showBanner(msg) {
 }
 function hideBanner() {
   els.banner.classList.add("hidden");
+}
+
+function toggleDownload() {
+  const hasContent = state.messages.some(
+    (m) => !m.pending || m.text !== "…",
+  );
+  els.download.disabled = !hasContent;
 }
 
 // -------- recording lifecycle --------
@@ -95,6 +104,7 @@ async function start() {
   state.messages = [];
   state.nextId = 1;
   els.log.innerHTML = "";
+  toggleDownload();
 
   updateStatus(true);
   state.timerInterval = setInterval(tickTimer, 500);
@@ -383,6 +393,7 @@ function renderMessage(msg) {
   node.querySelector(".text").textContent = msg.text;
   els.log.appendChild(node);
   els.log.scrollTop = els.log.scrollHeight;
+  toggleDownload();
 }
 
 function updateMessage(msg) {
@@ -391,11 +402,13 @@ function updateMessage(msg) {
   const t = node.querySelector(".text");
   t.textContent = msg.text;
   t.classList.toggle("pending", msg.pending);
+  toggleDownload();
 }
 
 function removeMessage(id) {
   const node = els.log.querySelector(`[data-id="${id}"]`);
   node?.remove();
+  toggleDownload();
 }
 
 function fmtTs(ms) {
