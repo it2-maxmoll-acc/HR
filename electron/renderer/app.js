@@ -83,6 +83,13 @@ function hideBanner() {
   els.banner.classList.add("hidden");
 }
 
+function toggleDownload() {
+  const hasContent = state.messages.some(
+    (m) => !m.pending || m.text !== "…",
+  );
+  els.download.disabled = !hasContent;
+}
+
 // -------- recording lifecycle --------
 
 async function start() {
@@ -97,6 +104,7 @@ async function start() {
   state.messages = [];
   state.nextId = 1;
   els.log.innerHTML = "";
+  toggleDownload();
 
   updateStatus(true);
   state.timerInterval = setInterval(tickTimer, 500);
