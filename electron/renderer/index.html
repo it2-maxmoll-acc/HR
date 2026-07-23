@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src *; media-src * blob:; img-src 'self' data:;"
+    />
+    <title>Realtime Transcriber</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <span>Realtime Transcriber</span>
+      </div>
+      <div id="status" class="status">Готов к записи</div>
+      <div id="timer" class="timer">00:00</div>
+    </header>
+
+    <section class="controls">
+      <label>
+        <span>Микрофон (HR)</span>
+        <select id="mic-select"></select>
+      </label>
+      <label>
+        <span>Системный звук (Кандидат)</span>
+        <select id="sys-select">
+          <option value="loopback">Системный звук (весь ПК)</option>
+        </select>
+      </label>
+      <label class="endpoint">
+        <span>Backend URL</span>
+        <input
+          id="endpoint"
+          type="url"
+          placeholder="https://project--ID.lovable.app/api/public/transcribe"
+        />
+      </label>
+      <div class="buttons">
+        <button id="start" class="btn primary">▶ Начать запись</button>
+        <button id="stop" class="btn danger" disabled>■ Остановить</button>
+        <button id="save" class="btn ghost" disabled>💾 Сохранить .txt</button>
+      </div>
+    </section>
+
+    <div id="banner" class="banner hidden"></div>
+
+    <main id="log" class="log" aria-live="polite"></main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
