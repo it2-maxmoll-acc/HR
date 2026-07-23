@@ -33,14 +33,15 @@ export const Route = createFileRoute("/api/public/transcribe")({
           return jsonError(400, "Malformed multipart body");
         }
 
-        const file = form.get("file");
+        const file = form.get("file") as unknown;
         if (!(file instanceof File) && !(file instanceof Blob)) {
           return jsonError(400, "Missing audio 'file' part");
         }
-        if (file.size === 0) {
+        const audio = file as Blob;
+        if (audio.size === 0) {
           return jsonError(400, "Audio file is empty");
         }
-        if (file.size > MAX_BYTES) {
+        if (audio.size > MAX_BYTES) {
           return jsonError(413, `Audio chunk too large (>${MAX_BYTES} bytes)`);
         }
 
@@ -53,8 +54,8 @@ export const Route = createFileRoute("/api/public/transcribe")({
         upstream.append("language", language);
         upstream.append(
           "file",
-          file,
-          (file as File).name || "chunk.wav",
+          audio,
+          (audio as File).name || "chunk.wav",
         );
 
         let providerResponse: Response;
