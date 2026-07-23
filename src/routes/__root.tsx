@@ -77,14 +77,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "Realtime Transcriber — расшифровка HR-интервью на русском" },
+      { name: "description", content: "Windows-приложение для реального времени: транскрибирует созвон с разделением по ролям HR / Кандидат. Работает с Яндекс Телемостом и любым другим приложением." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "Realtime Transcriber — расшифровка HR-интервью на русском" },
+      { property: "og:description", content: "Windows-приложение для реального времени: транскрибирует созвон с разделением по ролям HR / Кандидат. Работает с Яндекс Телемостом и любым другим приложением." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "Realtime Transcriber — расшифровка HR-интервью на русском" },
+      { name: "twitter:description", content: "Windows-приложение для реального времени: транскрибирует созвон с разделением по ролям HR / Кандидат. Работает с Яндекс Телемостом и любым другим приложением." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/dadf7ed6-865d-411f-bc0f-bd2d3fcb628b/id-preview-c97bfc13--ea3a71b5-4e0b-4c46-958e-e3204c5abc7d.lovable.app-1784815793287.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/dadf7ed6-865d-411f-bc0f-bd2d3fcb628b/id-preview-c97bfc13--ea3a71b5-4e0b-4c46-958e-e3204c5abc7d.lovable.app-1784815793287.png" },
     ],
     links: [
       {

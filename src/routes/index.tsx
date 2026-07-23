@@ -9,11 +9,11 @@ export const Route = createFileRoute("/")({
         content:
           "Windows-приложение для реального времени: транскрибирует созвон с разделением по ролям HR / Кандидат. Работает с Яндекс Телемостом и любым другим приложением.",
       },
-      { property: "og:title", content: "Realtime Transcriber для Windows" },
+      { property: "og:title", content: "Realtime Transcriber — расшифровка HR-интервью на русском" },
       {
         property: "og:description",
         content:
-          "Онлайн-расшифровка HR-интервью на русском языке с разделением по ролям. Работает с любым десктопным видеозвонком.",
+          "Windows-приложение для реального времени: транскрибирует созвон с разделением по ролям HR / Кандидат. Работает с Яндекс Телемостом и любым другим приложением.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
