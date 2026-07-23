@@ -16,6 +16,7 @@ const els = {
   start: document.getElementById("start"),
   stop: document.getElementById("stop"),
   save: document.getElementById("save"),
+  download: document.getElementById("download"),
   banner: document.getElementById("banner"),
   log: document.getElementById("log"),
 };
@@ -66,6 +67,7 @@ navigator.mediaDevices.addEventListener?.("devicechange", refreshDevices);
 els.start.addEventListener("click", () => start().catch(handleFatal));
 els.stop.addEventListener("click", () => stop().catch(handleFatal));
 els.save.addEventListener("click", () => saveTranscript(false));
+els.download.addEventListener("click", () => saveTranscript(false));
 
 function handleFatal(e) {
   console.error(e);
