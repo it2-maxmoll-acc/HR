@@ -1,0 +1,25 @@
+appId: dev.lovable.realtime-transcriber
+productName: Realtime Transcriber
+directories:
+  output: dist_electron
+  buildResources: electron/build
+files:
+  - electron/**/*
+  - package.json
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+asar: true
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: RealtimeTranscriber-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Realtime Transcriber
+publish: null
