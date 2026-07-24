@@ -435,11 +435,13 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
       }
     } else {
       const text = (data.text || "").trim();
-      if (text && isEnglishOrRussian(text) && !isLikelyHallucination(text)) {
+      if (text && isEnglishOrRussian(text)) {
         msg.text = text;
         msg.pending = false;
       } else {
-        // Drop empty output, hallucinations, or non-EN/RU noise.
+        // Drop empty output or non-EN/RU noise. Silence is already gated
+        // by isSilent() before sending, so short real words like "да"/"нет"
+        // reach here only when the user actually spoke.
         state.messages = state.messages.filter((m) => m.id !== id);
         removeMessage(id);
         return;
