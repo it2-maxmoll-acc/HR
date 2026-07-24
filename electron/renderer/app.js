@@ -1,7 +1,7 @@
 // Realtime Transcriber — renderer
 
 const DEFAULT_ENDPOINT =
-  "https://project--ea3a71b5-4e0b-4c46-958e-e3204c5abc7d.lovable.app/api/public/transcribe";
+  "https://real-time-talk-scribe.lovable.app/api/public/transcribe";
 
 const CHUNK_MS = 2500; // window length
 const OVERLAP_MS = 400; // overlap between chunks so words aren't cut
