@@ -388,7 +388,7 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
   form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
   form.append("role", role);
   form.append("chunk_index", String(chunkIndex));
-  form.append("language", "ru");
+  // Language is auto-detected; we filter to EN/RU below.
 
   try {
     const res = await fetch(endpoint, { method: "POST", body: form });
