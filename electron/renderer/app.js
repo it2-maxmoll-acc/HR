@@ -435,11 +435,11 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
       }
     } else {
       const text = (data.text || "").trim();
-      if (text && isEnglishOrRussian(text)) {
+      if (text && isEnglishOrRussian(text) && !isLikelyHallucination(text)) {
         msg.text = text;
         msg.pending = false;
       } else {
-        // Drop empty output or hallucinations in other languages.
+        // Drop empty output, hallucinations, or non-EN/RU noise.
         state.messages = state.messages.filter((m) => m.id !== id);
         removeMessage(id);
         return;
