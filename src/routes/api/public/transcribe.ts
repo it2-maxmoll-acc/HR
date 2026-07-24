@@ -51,7 +51,7 @@ export const Route = createFileRoute("/api/public/transcribe")({
 
         const upstream = new FormData();
         upstream.append("model", model);
-        upstream.append("language", language);
+        if (language) upstream.append("language", language);
         upstream.append(
           "file",
           audio,
