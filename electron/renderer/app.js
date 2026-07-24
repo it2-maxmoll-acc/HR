@@ -296,6 +296,38 @@ function flushBuffer(cap) {
   return encodeWav(merged, cap.audioCtx.sampleRate);
 }
 
+// Return true if the chunk is quiet enough that we treat it as silence.
+// Uses RMS + a peak check so short quiet chunks with a tiny click don't slip through.
+function isSilent(samples) {
+  let sumSq = 0;
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const v = samples[i];
+    sumSq += v * v;
+    const a = v < 0 ? -v : v;
+    if (a > peak) peak = a;
+  }
+  const rms = Math.sqrt(sumSq / samples.length);
+  // Thresholds tuned for typical microphone / system audio.
+  // rms < ~0.005 and peak < ~0.02 means effectively silence.
+  return rms < 0.005 && peak < 0.02;
+}
+
+// Keep only transcripts that look like English or Russian.
+// Anything dominated by CJK / Korean / Arabic / etc is a hallucination on silence.
+function isEnglishOrRussian(text) {
+  if (!text) return false;
+  const letters = text.match(/\p{L}/gu) || [];
+  if (letters.length === 0) return false;
+  let good = 0;
+  for (const ch of letters) {
+    // Latin (English) or Cyrillic (Russian)
+    if (/[A-Za-z\u0400-\u04FF]/.test(ch)) good++;
+  }
+  return good / letters.length >= 0.6;
+}
+
+
 function mergeFloat32(chunks, totalLen) {
   const out = new Float32Array(totalLen);
   let offset = 0;
