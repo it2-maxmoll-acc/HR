@@ -262,11 +262,15 @@ async function startCapture(role, stream) {
     if (cap.bufferSamples >= chunkSamples) {
       const merged = mergeFloat32(cap.buffer, cap.bufferSamples);
       const chunk = merged.subarray(0, chunkSamples);
-      const wav = encodeWav(chunk, audioCtx.sampleRate);
 
       const tsAtStart = cap.windowStartTs;
       const idx = cap.chunkIndex++;
-      sendChunk(cap.role, wav, tsAtStart, idx);
+
+      // Silence gate: skip near-silent chunks so the model doesn't hallucinate.
+      if (!isSilent(chunk)) {
+        const wav = encodeWav(chunk, audioCtx.sampleRate);
+        sendChunk(cap.role, wav, tsAtStart, idx);
+      }
 
       // Keep overlap tail as head of next buffer.
       const tail = merged.subarray(chunkSamples - overlapSamples);
@@ -276,6 +280,7 @@ async function startCapture(role, stream) {
         ((chunkSamples - overlapSamples) * 1000) / audioCtx.sampleRate;
     }
   };
+
 
   source.connect(processor);
   processor.connect(audioCtx.destination); // required for onaudioprocess to fire
