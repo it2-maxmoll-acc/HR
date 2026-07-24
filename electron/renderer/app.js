@@ -19,6 +19,8 @@ const els = {
   download: document.getElementById("download"),
   banner: document.getElementById("banner"),
   log: document.getElementById("log"),
+  sensitivity: document.getElementById("sensitivity"),
+  sensValue: document.getElementById("sens-value"),
 };
 
 const state = {
@@ -41,6 +43,27 @@ els.endpoint.addEventListener("change", () =>
   localStorage.setItem("endpoint", els.endpoint.value.trim()),
 );
 
+// Sensitivity 1..5 → thresholds. Higher = stricter (drops more as silence).
+const SENS_PROFILES = {
+  1: { rms: 0.008, peak: 0.035, voiced: 0.03 },
+  2: { rms: 0.011, peak: 0.045, voiced: 0.045 },
+  3: { rms: 0.016, peak: 0.06,  voiced: 0.07 },
+  4: { rms: 0.022, peak: 0.08,  voiced: 0.1 },
+  5: { rms: 0.03,  peak: 0.11,  voiced: 0.14 },
+};
+let silenceProfile = SENS_PROFILES[3];
+
+const savedSens = Number(localStorage.getItem("sensitivity")) || 3;
+els.sensitivity.value = String(savedSens);
+els.sensValue.textContent = String(savedSens);
+silenceProfile = SENS_PROFILES[savedSens] || SENS_PROFILES[3];
+els.sensitivity.addEventListener("input", () => {
+  const v = Number(els.sensitivity.value) || 3;
+  els.sensValue.textContent = String(v);
+  silenceProfile = SENS_PROFILES[v] || SENS_PROFILES[3];
+  localStorage.setItem("sensitivity", String(v));
+});
+
 async function refreshDevices() {
   try {
     // getUserMedia once to unlock device labels.
@@ -56,6 +79,22 @@ async function refreshDevices() {
       opt.textContent = m.label || `Микрофон ${m.deviceId.slice(0, 6)}`;
       els.mic.appendChild(opt);
     }
+    // System audio: keep loopback default, but also list any audioinput
+    // devices (useful when a virtual loopback cable is installed).
+    els.sys.innerHTML = "";
+    const loop = document.createElement("option");
+    loop.value = "loopback";
+    loop.textContent = "Системный звук (весь ПК)";
+    els.sys.appendChild(loop);
+    for (const m of mics) {
+      const opt = document.createElement("option");
+      opt.value = "input:" + m.deviceId;
+      opt.textContent =
+        "Вход: " + (m.label || `устройство ${m.deviceId.slice(0, 6)}`);
+      els.sys.appendChild(opt);
+    }
+    const savedSys = localStorage.getItem("sys-source");
+    if (savedSys) els.sys.value = savedSys;
     if (probe) probe.getTracks().forEach((t) => t.stop());
   } catch (e) {
     showBanner("Не удалось получить список микрофонов: " + e.message);
@@ -64,6 +103,12 @@ async function refreshDevices() {
 
 refreshDevices();
 navigator.mediaDevices.addEventListener?.("devicechange", refreshDevices);
+els.sys.addEventListener("change", () =>
+  localStorage.setItem("sys-source", els.sys.value),
+);
+els.mic.addEventListener("change", () =>
+  localStorage.setItem("mic-source", els.mic.value),
+);
 
 // -------- controls --------
 
@@ -125,13 +170,26 @@ async function start() {
 
   // System audio via getDisplayMedia (Electron 30+ with setDisplayMediaRequestHandler)
   let sysStream = null;
+  const sysChoice = els.sys.value || "loopback";
   try {
-    sysStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: true,
-    });
-    // Drop video tracks — we only need audio.
-    sysStream.getVideoTracks().forEach((t) => t.stop());
+    if (sysChoice.startsWith("input:")) {
+      const deviceId = sysChoice.slice("input:".length);
+      sysStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: deviceId },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
+    } else {
+      sysStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+      });
+      // Drop video tracks — we only need audio.
+      sysStream.getVideoTracks().forEach((t) => t.stop());
+    }
   } catch (e) {
     console.warn("getDisplayMedia failed, falling back to desktopCapturer", e);
     try {
@@ -304,7 +362,7 @@ function isSilent(samples) {
   let sumSq = 0;
   let peak = 0;
   let voiced = 0;
-  const voiceFloor = 0.015;
+  const voiceFloor = 0.02;
   for (let i = 0; i < samples.length; i++) {
     const v = samples[i];
     sumSq += v * v;
@@ -314,10 +372,10 @@ function isSilent(samples) {
   }
   const rms = Math.sqrt(sumSq / samples.length);
   const voicedRatio = voiced / samples.length;
-  // Tightened: needs real sustained energy to pass as speech.
-  if (rms < 0.012) return true;
-  if (peak < 0.05) return true;
-  if (voicedRatio < 0.05) return true;
+  // Thresholds come from the user-selected sensitivity profile.
+  if (rms < silenceProfile.rms) return true;
+  if (peak < silenceProfile.peak) return true;
+  if (voicedRatio < silenceProfile.voiced) return true;
   return false;
 }
 
