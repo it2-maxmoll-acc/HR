@@ -45,13 +45,13 @@ export const Route = createFileRoute("/api/public/transcribe")({
           return jsonError(413, `Audio chunk too large (>${MAX_BYTES} bytes)`);
         }
 
-        const language = (form.get("language") as string) || "ru";
+        const language = (form.get("language") as string) || "";
         const model =
           (form.get("model") as string) || "openai/gpt-4o-transcribe";
 
         const upstream = new FormData();
         upstream.append("model", model);
-        upstream.append("language", language);
+        if (language) upstream.append("language", language);
         upstream.append(
           "file",
           audio,

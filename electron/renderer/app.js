@@ -262,11 +262,15 @@ async function startCapture(role, stream) {
     if (cap.bufferSamples >= chunkSamples) {
       const merged = mergeFloat32(cap.buffer, cap.bufferSamples);
       const chunk = merged.subarray(0, chunkSamples);
-      const wav = encodeWav(chunk, audioCtx.sampleRate);
 
       const tsAtStart = cap.windowStartTs;
       const idx = cap.chunkIndex++;
-      sendChunk(cap.role, wav, tsAtStart, idx);
+
+      // Silence gate: skip near-silent chunks so the model doesn't hallucinate.
+      if (!isSilent(chunk)) {
+        const wav = encodeWav(chunk, audioCtx.sampleRate);
+        sendChunk(cap.role, wav, tsAtStart, idx);
+      }
 
       // Keep overlap tail as head of next buffer.
       const tail = merged.subarray(chunkSamples - overlapSamples);
@@ -276,6 +280,7 @@ async function startCapture(role, stream) {
         ((chunkSamples - overlapSamples) * 1000) / audioCtx.sampleRate;
     }
   };
+
 
   source.connect(processor);
   processor.connect(audioCtx.destination); // required for onaudioprocess to fire
@@ -290,6 +295,38 @@ function flushBuffer(cap) {
   cap.startTs = cap.windowStartTs;
   return encodeWav(merged, cap.audioCtx.sampleRate);
 }
+
+// Return true if the chunk is quiet enough that we treat it as silence.
+// Uses RMS + a peak check so short quiet chunks with a tiny click don't slip through.
+function isSilent(samples) {
+  let sumSq = 0;
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const v = samples[i];
+    sumSq += v * v;
+    const a = v < 0 ? -v : v;
+    if (a > peak) peak = a;
+  }
+  const rms = Math.sqrt(sumSq / samples.length);
+  // Thresholds tuned for typical microphone / system audio.
+  // rms < ~0.005 and peak < ~0.02 means effectively silence.
+  return rms < 0.005 && peak < 0.02;
+}
+
+// Keep only transcripts that look like English or Russian.
+// Anything dominated by CJK / Korean / Arabic / etc is a hallucination on silence.
+function isEnglishOrRussian(text) {
+  if (!text) return false;
+  const letters = text.match(/\p{L}/gu) || [];
+  if (letters.length === 0) return false;
+  let good = 0;
+  for (const ch of letters) {
+    // Latin (English) or Cyrillic (Russian)
+    if (/[A-Za-z\u0400-\u04FF]/.test(ch)) good++;
+  }
+  return good / letters.length >= 0.6;
+}
+
 
 function mergeFloat32(chunks, totalLen) {
   const out = new Float32Array(totalLen);
@@ -351,7 +388,7 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
   form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
   form.append("role", role);
   form.append("chunk_index", String(chunkIndex));
-  form.append("language", "ru");
+  // Language is auto-detected; we filter to EN/RU below.
 
   try {
     const res = await fetch(endpoint, { method: "POST", body: form });
@@ -368,15 +405,16 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
       }
     } else {
       const text = (data.text || "").trim();
-      if (text) {
+      if (text && isEnglishOrRussian(text)) {
         msg.text = text;
         msg.pending = false;
       } else {
-        // Drop empty (silence).
+        // Drop empty output or hallucinations in other languages.
         state.messages = state.messages.filter((m) => m.id !== id);
         removeMessage(id);
         return;
       }
+
     }
   } catch (e) {
     msg.text = "[сеть недоступна]";
