@@ -297,20 +297,50 @@ function flushBuffer(cap) {
 }
 
 // Return true if the chunk is quiet enough that we treat it as silence.
-// Uses RMS + a peak check so short quiet chunks with a tiny click don't slip through.
+// Uses RMS + peak + "voiced ratio" (share of samples above a small floor).
+// Clicks or fan noise can push peak up while the chunk is really silent,
+// so we require a meaningful fraction of samples to be non-trivial.
 function isSilent(samples) {
   let sumSq = 0;
   let peak = 0;
+  let voiced = 0;
+  const voiceFloor = 0.015;
   for (let i = 0; i < samples.length; i++) {
     const v = samples[i];
     sumSq += v * v;
     const a = v < 0 ? -v : v;
     if (a > peak) peak = a;
+    if (a > voiceFloor) voiced++;
   }
   const rms = Math.sqrt(sumSq / samples.length);
-  // Thresholds tuned for typical microphone / system audio.
-  // rms < ~0.005 and peak < ~0.02 means effectively silence.
-  return rms < 0.005 && peak < 0.02;
+  const voicedRatio = voiced / samples.length;
+  // Tightened: needs real sustained energy to pass as speech.
+  if (rms < 0.012) return true;
+  if (peak < 0.05) return true;
+  if (voicedRatio < 0.05) return true;
+  return false;
+}
+
+// Short outputs the model tends to hallucinate on silence / room noise.
+const HALLUCINATION_PHRASES = new Set([
+  "hi", "hello", "hey", "ok", "okay", "yeah", "yes", "no", "thanks",
+  "thank you", "bye", "meow", "uh", "um", "hmm", "mhm", "oh", "wow",
+  "you", "the", "so", "well", "right",
+  "привет", "да", "нет", "ага", "угу", "спасибо", "пока", "ой", "ну",
+]);
+
+function isLikelyHallucination(text) {
+  const normalized = text
+    .toLowerCase()
+    .replace(/[.!?,\s]+$/g, "")
+    .replace(/^[.!?,\s]+/g, "")
+    .trim();
+  if (!normalized) return true;
+  if (HALLUCINATION_PHRASES.has(normalized)) return true;
+  // Very short outputs (<= 3 letters) are almost always noise.
+  const lettersOnly = normalized.replace(/[^\p{L}]/gu, "");
+  if (lettersOnly.length <= 3) return true;
+  return false;
 }
 
 // Keep only transcripts that look like English or Russian.
@@ -405,11 +435,11 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
       }
     } else {
       const text = (data.text || "").trim();
-      if (text && isEnglishOrRussian(text)) {
+      if (text && isEnglishOrRussian(text) && !isLikelyHallucination(text)) {
         msg.text = text;
         msg.pending = false;
       } else {
-        // Drop empty output or hallucinations in other languages.
+        // Drop empty output, hallucinations, or non-EN/RU noise.
         state.messages = state.messages.filter((m) => m.id !== id);
         removeMessage(id);
         return;
