@@ -405,15 +405,16 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
       }
     } else {
       const text = (data.text || "").trim();
-      if (text) {
+      if (text && isEnglishOrRussian(text)) {
         msg.text = text;
         msg.pending = false;
       } else {
-        // Drop empty (silence).
+        // Drop empty output or hallucinations in other languages.
         state.messages = state.messages.filter((m) => m.id !== id);
         removeMessage(id);
         return;
       }
+
     }
   } catch (e) {
     msg.text = "[сеть недоступна]";
