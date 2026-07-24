@@ -26,6 +26,7 @@ const els = {
   log: document.getElementById("log"),
   sensitivity: document.getElementById("sensitivity"),
   sensValue: document.getElementById("sens-value"),
+  overlay: document.getElementById("overlay"),
 };
 
 const state = {
@@ -114,6 +115,7 @@ els.start.addEventListener("click", () => start().catch(handleFatal));
 els.stop.addEventListener("click", () => stop().catch(handleFatal));
 els.save.addEventListener("click", () => saveTranscript(false));
 els.download.addEventListener("click", () => saveTranscript(false));
+els.overlay.addEventListener("click", () => window.api.openOverlay?.());
 
 function handleFatal(e) {
   console.error(e);
@@ -148,6 +150,7 @@ async function start() {
   state.messages = [];
   state.nextId = 1;
   els.log.innerHTML = "";
+  window.api.clearLines?.();
   toggleDownload();
 
   updateStatus(true);
@@ -480,7 +483,11 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
   form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
   form.append("role", role);
   form.append("chunk_index", String(chunkIndex));
-  // Language is auto-detected; we filter to EN/RU below.
+  form.append("language", "ru");
+  form.append(
+    "prompt",
+    "Числа пиши арабскими цифрами. Знаки препинания расставляй точно. Пиши каждое слово отдельно.",
+  );
 
   try {
     const res = await fetch(endpoint, { method: "POST", body: form });
@@ -495,12 +502,10 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
       }
     } else {
       const text = (data.text || "").trim();
-      if (text && isEnglishOrRussian(text)) {
+      if (text && !isLikelyHallucination(text) && isEnglishOrRussian(text)) {
         addOrMergeMessage(role, tsMs, text, chunkIndex);
       } else {
-        // Drop empty output or non-EN/RU noise. Silence is already gated
-        // by isSilent() before sending, so short real words like "да"/"нет"
-        // reach here only when the user actually spoke.
+        // Drop empty, hallucinated, or non-RU output.
         return;
       }
     }
@@ -520,6 +525,7 @@ function addMessage(role, tsMs, text, chunkIndex) {
   };
   state.messages.push(msg);
   renderMessage(msg);
+  window.api.pushTranscriptLine?.({ id: msg.id, role: msg.role, tsMs: msg.tsMs, text: msg.text });
 }
 
 function addOrMergeMessage(role, tsMs, text, chunkIndex) {
@@ -529,6 +535,12 @@ function addOrMergeMessage(role, tsMs, text, chunkIndex) {
     last.lastTsMs = tsMs;
     last.chunkIndex = chunkIndex;
     updateMessage(last);
+    window.api.pushTranscriptLine?.({
+      id: last.id,
+      role: last.role,
+      tsMs: last.tsMs,
+      text: last.text,
+    });
     return;
   }
   addMessage(role, tsMs, text, chunkIndex);

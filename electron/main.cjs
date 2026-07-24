@@ -7,6 +7,8 @@ const os = require("os");
 
 const isDev = !app.isPackaged;
 
+let overlayWin = null;
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1100,
@@ -23,6 +25,11 @@ function createWindow() {
   });
 
   win.loadFile(path.join(__dirname, "renderer", "index.html"));
+
+  // Close overlay when the main window closes.
+  win.on("closed", () => {
+    if (overlayWin && !overlayWin.isDestroyed()) overlayWin.close();
+  });
 
   if (isDev) {
     win.webContents.openDevTools({ mode: "detach" });
@@ -77,10 +84,7 @@ ipcMain.handle("save-transcript", async (_evt, payload) => {
   const { content, defaultName } = payload || {};
   const safeName =
     (defaultName && String(defaultName)) ||
-    `Транскрипция_${new Date()
-      .toISOString()
-      .slice(0, 16)
-      .replace(/[:T]/g, "-")}.txt`;
+    `Транскрипция_${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.txt`;
 
   const win = BrowserWindow.getFocusedWindow();
   const res = await dialog.showSaveDialog(win, {
@@ -99,10 +103,7 @@ ipcMain.handle("autosave-transcript", async (_evt, payload) => {
   if (!content) return { saved: false };
   const dir = path.join(app.getPath("userData"), "sessions");
   fs.mkdirSync(dir, { recursive: true });
-  const stamp = new Date()
-    .toISOString()
-    .slice(0, 19)
-    .replace(/[:T]/g, "-");
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const file = path.join(dir, `session_${stamp}.txt`);
   fs.writeFileSync(file, content, "utf8");
   return { saved: true, path: file };
@@ -113,3 +114,47 @@ ipcMain.handle("get-app-info", () => ({
   platform: process.platform,
   homedir: os.homedir(),
 }));
+
+// -------- overlay window --------
+
+ipcMain.handle("open-overlay", async () => {
+  if (overlayWin && !overlayWin.isDestroyed()) {
+    overlayWin.focus();
+    return;
+  }
+  overlayWin = new BrowserWindow({
+    width: 440,
+    height: 320,
+    minWidth: 280,
+    minHeight: 160,
+    title: "Расшифровка",
+    alwaysOnTop: true,
+    transparent: true,
+    frame: false,
+    resizable: true,
+    skipTaskbar: false,
+    hasShadow: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  overlayWin.loadFile(path.join(__dirname, "renderer", "overlay.html"));
+  overlayWin.on("closed", () => {
+    overlayWin = null;
+  });
+});
+
+ipcMain.handle("push-transcript-line", (_evt, msg) => {
+  if (overlayWin && !overlayWin.isDestroyed()) {
+    overlayWin.webContents.send("new-line", msg);
+  }
+});
+
+ipcMain.handle("clear-lines", () => {
+  if (overlayWin && !overlayWin.isDestroyed()) {
+    overlayWin.webContents.send("clear-lines");
+  }
+});
