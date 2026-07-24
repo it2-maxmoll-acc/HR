@@ -1,7 +1,7 @@
 // Realtime Transcriber — renderer
 
 const DEFAULT_ENDPOINT =
-  "https://project--ea3a71b5-4e0b-4c46-958e-e3204c5abc7d.lovable.app/api/public/transcribe";
+  "https://real-time-talk-scribe.lovable.app/api/public/transcribe";
 
 const CHUNK_MS = 2500; // window length
 const OVERLAP_MS = 400; // overlap between chunks so words aren't cut
@@ -32,8 +32,11 @@ const state = {
 
 // -------- init --------
 
-els.endpoint.value =
-  localStorage.getItem("endpoint") || DEFAULT_ENDPOINT;
+const savedEndpoint = localStorage.getItem("endpoint");
+if (savedEndpoint && savedEndpoint.includes("ea3a71b5-4e0b-4c46-958e-e3204c5abc7d")) {
+  localStorage.removeItem("endpoint");
+}
+els.endpoint.value = localStorage.getItem("endpoint") || DEFAULT_ENDPOINT;
 els.endpoint.addEventListener("change", () =>
   localStorage.setItem("endpoint", els.endpoint.value.trim()),
 );
