@@ -1,11 +1,16 @@
 // Realtime Transcriber — renderer
 
-const DEFAULT_ENDPOINT =
-  "https://real-time-talk-scribe.lovable.app/api/public/transcribe";
+const DEFAULT_ENDPOINT = "https://real-time-talk-scribe.lovable.app/api/public/transcribe";
 
 const CHUNK_MS = 2500; // window length
 const OVERLAP_MS = 400; // overlap between chunks so words aren't cut
 const SAMPLE_RATE = 16000;
+// Allow one delayed chunk or network jitter before starting a new phrase line.
+const MERGE_TOLERANCE_MS = 1500;
+// 4s merge window total: 2.5s chunk + 1.5s tolerance.
+const MERGE_GAP_MS = CHUNK_MS + MERGE_TOLERANCE_MS;
+// Detect and remove up to this many repeated boundary words from overlap.
+const MAX_OVERLAP_WORDS = 8;
 
 const els = {
   status: document.getElementById("status"),
@@ -28,7 +33,7 @@ const state = {
   startedAt: 0,
   timerInterval: null,
   captures: [], // { role, stream, audioCtx, source, processor, buffer, chunkIndex }
-  messages: [], // { role, tsMs, text, id, pending }
+  messages: [], // { role, tsMs, lastTsMs, text, id }
   nextId: 1,
 };
 
@@ -47,9 +52,9 @@ els.endpoint.addEventListener("change", () =>
 const SENS_PROFILES = {
   1: { rms: 0.008, peak: 0.035, voiced: 0.03 },
   2: { rms: 0.011, peak: 0.045, voiced: 0.045 },
-  3: { rms: 0.016, peak: 0.06,  voiced: 0.07 },
-  4: { rms: 0.022, peak: 0.08,  voiced: 0.1 },
-  5: { rms: 0.03,  peak: 0.11,  voiced: 0.14 },
+  3: { rms: 0.016, peak: 0.06, voiced: 0.07 },
+  4: { rms: 0.022, peak: 0.08, voiced: 0.1 },
+  5: { rms: 0.03, peak: 0.11, voiced: 0.14 },
 };
 let silenceProfile = SENS_PROFILES[3];
 
@@ -67,9 +72,7 @@ els.sensitivity.addEventListener("input", () => {
 async function refreshDevices() {
   try {
     // getUserMedia once to unlock device labels.
-    const probe = await navigator.mediaDevices
-      .getUserMedia({ audio: true })
-      .catch(() => null);
+    const probe = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
     const devices = await navigator.mediaDevices.enumerateDevices();
     const mics = devices.filter((d) => d.kind === "audioinput");
     els.mic.innerHTML = "";
@@ -89,8 +92,7 @@ async function refreshDevices() {
     for (const m of mics) {
       const opt = document.createElement("option");
       opt.value = "input:" + m.deviceId;
-      opt.textContent =
-        "Вход: " + (m.label || `устройство ${m.deviceId.slice(0, 6)}`);
+      opt.textContent = "Вход: " + (m.label || `устройство ${m.deviceId.slice(0, 6)}`);
       els.sys.appendChild(opt);
     }
     const savedSys = localStorage.getItem("sys-source");
@@ -103,12 +105,8 @@ async function refreshDevices() {
 
 refreshDevices();
 navigator.mediaDevices.addEventListener?.("devicechange", refreshDevices);
-els.sys.addEventListener("change", () =>
-  localStorage.setItem("sys-source", els.sys.value),
-);
-els.mic.addEventListener("change", () =>
-  localStorage.setItem("mic-source", els.mic.value),
-);
+els.sys.addEventListener("change", () => localStorage.setItem("sys-source", els.sys.value));
+els.mic.addEventListener("change", () => localStorage.setItem("mic-source", els.mic.value));
 
 // -------- controls --------
 
@@ -132,9 +130,7 @@ function hideBanner() {
 }
 
 function toggleDownload() {
-  const hasContent = state.messages.some(
-    (m) => !m.pending || m.text !== "…",
-  );
+  const hasContent = state.messages.some((m) => m.text.trim().length > 0);
   els.download.disabled = !hasContent;
 }
 
@@ -277,8 +273,7 @@ function updateStatus(recording) {
 function tickTimer() {
   const s = Math.floor((performance.now() - state.startedAt) / 1000);
   const m = Math.floor(s / 60);
-  els.timer.textContent =
-    String(m).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+  els.timer.textContent = String(m).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
 }
 
 // -------- audio capture with ScriptProcessor (portable) --------
@@ -303,12 +298,8 @@ async function startCapture(role, stream) {
     windowStartTs: performance.now() - state.startedAt,
   };
 
-  const chunkSamples = Math.round(
-    (audioCtx.sampleRate * CHUNK_MS) / 1000,
-  );
-  const overlapSamples = Math.round(
-    (audioCtx.sampleRate * OVERLAP_MS) / 1000,
-  );
+  const chunkSamples = Math.round((audioCtx.sampleRate * CHUNK_MS) / 1000);
+  const overlapSamples = Math.round((audioCtx.sampleRate * OVERLAP_MS) / 1000);
 
   processor.onaudioprocess = (e) => {
     if (!state.recording) return;
@@ -334,11 +325,9 @@ async function startCapture(role, stream) {
       const tail = merged.subarray(chunkSamples - overlapSamples);
       cap.buffer = [new Float32Array(tail)];
       cap.bufferSamples = tail.length;
-      cap.windowStartTs +=
-        ((chunkSamples - overlapSamples) * 1000) / audioCtx.sampleRate;
+      cap.windowStartTs += ((chunkSamples - overlapSamples) * 1000) / audioCtx.sampleRate;
     }
   };
-
 
   source.connect(processor);
   processor.connect(audioCtx.destination); // required for onaudioprocess to fire
@@ -381,10 +370,38 @@ function isSilent(samples) {
 
 // Short outputs the model tends to hallucinate on silence / room noise.
 const HALLUCINATION_PHRASES = new Set([
-  "hi", "hello", "hey", "ok", "okay", "yeah", "yes", "no", "thanks",
-  "thank you", "bye", "meow", "uh", "um", "hmm", "mhm", "oh", "wow",
-  "you", "the", "so", "well", "right",
-  "привет", "да", "нет", "ага", "угу", "спасибо", "пока", "ой", "ну",
+  "hi",
+  "hello",
+  "hey",
+  "ok",
+  "okay",
+  "yeah",
+  "yes",
+  "no",
+  "thanks",
+  "thank you",
+  "bye",
+  "meow",
+  "uh",
+  "um",
+  "hmm",
+  "mhm",
+  "oh",
+  "wow",
+  "you",
+  "the",
+  "so",
+  "well",
+  "right",
+  "привет",
+  "да",
+  "нет",
+  "ага",
+  "угу",
+  "спасибо",
+  "пока",
+  "ой",
+  "ну",
 ]);
 
 function isLikelyHallucination(text) {
@@ -414,7 +431,6 @@ function isEnglishOrRussian(text) {
   }
   return good / letters.length >= 0.6;
 }
-
 
 function mergeFloat32(chunks, totalLen) {
   const out = new Float32Array(totalLen);
@@ -458,18 +474,6 @@ function writeStr(view, offset, str) {
 // -------- send + render --------
 
 async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
-  const id = state.nextId++;
-  const msg = {
-    id,
-    role,
-    tsMs,
-    text: "…",
-    pending: true,
-    chunkIndex,
-  };
-  state.messages.push(msg);
-  renderMessage(msg);
-
   const endpoint = (els.endpoint.value || DEFAULT_ENDPOINT).trim();
 
   const form = new FormData();
@@ -482,10 +486,8 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     const res = await fetch(endpoint, { method: "POST", body: form });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const detail =
-        data?.error || data?.detail?.error?.message || `HTTP ${res.status}`;
-      msg.text = "[ошибка: " + detail + "]";
-      msg.pending = false;
+      const detail = data?.error || data?.detail?.error?.message || `HTTP ${res.status}`;
+      addMessage(role, tsMs, `[ошибка: ${detail}]`, chunkIndex);
       if (res.status === 402) {
         showBanner("Кредиты Lovable AI закончились. Пополните и продолжите.");
       } else if (res.status === 429) {
@@ -494,23 +496,87 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     } else {
       const text = (data.text || "").trim();
       if (text && isEnglishOrRussian(text)) {
-        msg.text = text;
-        msg.pending = false;
+        addOrMergeMessage(role, tsMs, text, chunkIndex);
       } else {
         // Drop empty output or non-EN/RU noise. Silence is already gated
         // by isSilent() before sending, so short real words like "да"/"нет"
         // reach here only when the user actually spoke.
-        state.messages = state.messages.filter((m) => m.id !== id);
-        removeMessage(id);
         return;
       }
-
     }
   } catch (e) {
-    msg.text = "[сеть недоступна]";
-    msg.pending = false;
+    addMessage(role, tsMs, "[сеть недоступна]", chunkIndex);
   }
-  updateMessage(msg);
+}
+
+function addMessage(role, tsMs, text, chunkIndex) {
+  const msg = {
+    id: state.nextId++,
+    role,
+    tsMs,
+    lastTsMs: tsMs,
+    text,
+    chunkIndex,
+  };
+  state.messages.push(msg);
+  renderMessage(msg);
+}
+
+function addOrMergeMessage(role, tsMs, text, chunkIndex) {
+  const last = state.messages[state.messages.length - 1];
+  if (canMergeWithLast(last, role, tsMs)) {
+    last.text = mergeChunkText(last.text, text);
+    last.lastTsMs = tsMs;
+    last.chunkIndex = chunkIndex;
+    updateMessage(last);
+    return;
+  }
+  addMessage(role, tsMs, text, chunkIndex);
+}
+
+function canMergeWithLast(last, role, tsMs) {
+  if (!last) return false;
+  if (last.role !== role) return false;
+  if (last.text.startsWith("[")) return false;
+  const gapMs = tsMs - last.lastTsMs;
+  return gapMs >= 0 && gapMs <= MERGE_GAP_MS;
+}
+
+function mergeChunkText(currentText, nextText) {
+  const current = currentText.trim();
+  const incoming = nextText.trim();
+  if (!current) return incoming;
+  if (!incoming) return current;
+
+  const currentWords = current.split(/\s+/);
+  const incomingWords = incoming.split(/\s+/);
+  const normalizedCurrent = currentWords.map(normalizeWord);
+  const normalizedIncoming = incomingWords.map(normalizeWord);
+  const maxOverlap = Math.min(MAX_OVERLAP_WORDS, currentWords.length, incomingWords.length);
+  let overlap = 0;
+
+  for (let size = maxOverlap; size >= 1; size--) {
+    const currentTail = normalizedCurrent.slice(normalizedCurrent.length - size);
+    const incomingHead = normalizedIncoming.slice(0, size);
+    if (currentTail.join(" ") === incomingHead.join(" ")) {
+      overlap = size;
+      break;
+    }
+  }
+
+  const incomingTail = incomingWords.slice(overlap).join(" ");
+  if (!incomingTail) return current;
+  // If current already ends with whitespace or "-", don't add an extra separator.
+  const spacer = /[\s-]$/.test(current) ? "" : " ";
+  return current + spacer + incomingTail;
+}
+
+function normalizeWord(word) {
+  // Keep Unicode letters/numbers (incl. Cyrillic) and trim boundary punctuation.
+  return word
+    .toLowerCase()
+    .replace(/^[^\p{L}\p{N}]+/gu, "")
+    .replace(/[^\p{L}\p{N}]+$/gu, "");
 }
 
 function renderMessage(msg) {
@@ -520,7 +586,7 @@ function renderMessage(msg) {
   node.innerHTML =
     `<span class="badge ${msg.role === "HR" ? "hr" : "cand"}">${msg.role}</span>` +
     `<span class="ts">[${fmtTs(msg.tsMs)}]</span>` +
-    `<span class="text ${msg.pending ? "pending" : ""}"></span>`;
+    `<span class="text"></span>`;
   node.querySelector(".text").textContent = msg.text;
   els.log.appendChild(node);
   els.log.scrollTop = els.log.scrollHeight;
@@ -532,7 +598,6 @@ function updateMessage(msg) {
   if (!node) return;
   const t = node.querySelector(".text");
   t.textContent = msg.text;
-  t.classList.toggle("pending", msg.pending);
   toggleDownload();
 }
 
@@ -553,11 +618,9 @@ function fmtTs(ms) {
 function buildTranscriptText() {
   const header = `Транскрипция встречи — ${new Date().toLocaleString("ru-RU")}\n\n`;
   const ordered = [...state.messages]
-    .filter((m) => !m.pending || m.text !== "…")
+    .filter((m) => m.text.trim().length > 0)
     .sort((a, b) => a.tsMs - b.tsMs);
-  const lines = ordered.map(
-    (m) => `[${fmtTs(m.tsMs)}] ${m.role}: ${m.text}`,
-  );
+  const lines = ordered.map((m) => `[${fmtTs(m.tsMs)}] ${m.role}: ${m.text}`);
   return header + lines.join("\n") + "\n";
 }
 
