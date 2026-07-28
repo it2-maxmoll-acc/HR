@@ -1,7 +1,5 @@
 // Realtime Transcriber — renderer
 
-const DEFAULT_ENDPOINT = "https://real-time-talk-scribe.lovable.app/api/public/transcribe";
-
 const CHUNK_MS = 2500; // window length
 const OVERLAP_MS = 400; // overlap between chunks so words aren't cut
 const SAMPLE_RATE = 16000;
@@ -17,7 +15,8 @@ const els = {
   timer: document.getElementById("timer"),
   mic: document.getElementById("mic-select"),
   sys: document.getElementById("sys-select"),
-  endpoint: document.getElementById("endpoint"),
+  apiKey: document.getElementById("api-key"),
+  modelSelect: document.getElementById("model-select"),
   start: document.getElementById("start"),
   stop: document.getElementById("stop"),
   save: document.getElementById("save"),
@@ -40,13 +39,15 @@ const state = {
 
 // -------- init --------
 
-const savedEndpoint = localStorage.getItem("endpoint");
-if (savedEndpoint && savedEndpoint.includes("ea3a71b5-4e0b-4c46-958e-e3204c5abc7d")) {
-  localStorage.removeItem("endpoint");
-}
-els.endpoint.value = localStorage.getItem("endpoint") || DEFAULT_ENDPOINT;
-els.endpoint.addEventListener("change", () =>
-  localStorage.setItem("endpoint", els.endpoint.value.trim()),
+els.apiKey.value = localStorage.getItem("openai-api-key") || "";
+els.apiKey.addEventListener("change", () =>
+  localStorage.setItem("openai-api-key", els.apiKey.value.trim()),
+);
+
+const savedModel = localStorage.getItem("openai-model") || "whisper-1";
+els.modelSelect.value = savedModel;
+els.modelSelect.addEventListener("change", () =>
+  localStorage.setItem("openai-model", els.modelSelect.value),
 );
 
 // Sensitivity 1..5 → thresholds. Higher = stricter (drops more as silence).
@@ -474,32 +475,6 @@ function writeStr(view, offset, str) {
   for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
 }
 
-// -------- request throttle --------
-
-const MAX_CONCURRENT = 2;
-let _activeRequests = 0;
-const _requestQueue = [];
-
-function _acquireSlot() {
-  return new Promise((resolve) => {
-    if (_activeRequests < MAX_CONCURRENT) {
-      _activeRequests++;
-      resolve();
-    } else {
-      _requestQueue.push(resolve);
-    }
-  });
-}
-
-function _releaseSlot() {
-  const next = _requestQueue.shift();
-  if (next) {
-    next();
-  } else {
-    _activeRequests--;
-  }
-}
-
 function _sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -507,67 +482,80 @@ function _sleep(ms) {
 // -------- send + render --------
 
 async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
-  const endpoint = (els.endpoint.value || DEFAULT_ENDPOINT).trim();
+  const apiKey = (els.apiKey.value || "").trim();
+  if (!apiKey) {
+    showBanner("Введите OpenAI API Key в поле выше, затем начните запись снова.");
+    return;
+  }
+
+  const model = els.modelSelect.value || "whisper-1";
+  const OPENAI_ENDPOINT = "https://api.openai.com/v1/audio/transcriptions";
 
   const form = new FormData();
   form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
-  form.append("role", role);
-  form.append("chunk_index", String(chunkIndex));
+  form.append("model", model);
   form.append("language", "ru");
   form.append(
     "prompt",
     "Числа пиши арабскими цифрами. Знаки препинания расставляй точно. Пиши каждое слово отдельно.",
   );
 
-  const MAX_RETRIES = 3;
+  // Retry indefinitely on 429 (rate limit) so nothing is ever dropped.
   let attempt = 0;
+  while (true) {
+    let res, data;
+    try {
+      res = await fetch(OPENAI_ENDPOINT, {
+        method: "POST",
+        headers: { Authorization: `****** },
+        body: form,
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      // Network error — retry after a short pause (e.g. Wi-Fi blip).
+      attempt++;
+      const delay = Math.min(Math.pow(2, attempt) * 500, 8000);
+      showBanner(`Сеть недоступна, повтор через ${delay / 1000}с… (попытка ${attempt})`);
+      await _sleep(delay);
+      continue;
+    }
 
-  await _acquireSlot();
-  try {
-    while (attempt <= MAX_RETRIES) {
-      let res, data;
-      try {
-        res = await fetch(endpoint, { method: "POST", body: form });
-        data = await res.json().catch(() => ({}));
-      } catch (e) {
-        addMessage(role, tsMs, "[сеть недоступна]", chunkIndex);
-        return;
-      }
+    if (res.status === 429) {
+      // Rate-limited — back off and retry without ever dropping the chunk.
+      attempt++;
+      const delay = Math.min(Math.pow(2, attempt) * 500, 16000);
+      showBanner(`Лимит OpenAI, повтор через ${delay / 1000}с… (попытка ${attempt})`);
+      await _sleep(delay);
+      continue;
+    }
 
-      if (res.status === 429) {
+    if (res.status === 401) {
+      showBanner("Неверный OpenAI API Key. Проверьте ключ и перезапустите запись.");
+      return;
+    }
+
+    if (!res.ok) {
+      const errMsg =
+        data?.error?.message || data?.error || `HTTP ${res.status}`;
+      // Transient server error — retry a few times before giving up.
+      if (res.status >= 500 && attempt < 5) {
         attempt++;
-        if (attempt > MAX_RETRIES) {
-          // Silently drop — don't pollute transcript with rate-limit errors.
-          showBanner("Слишком много запросов, замедляем поток.");
-          return;
-        }
-        // Exponential backoff: 1s, 2s, 4s
-        const delay = Math.pow(2, attempt - 1) * 1000;
-        showBanner("Слишком много запросов, повтор через " + delay / 1000 + "с…");
+        const delay = Math.min(Math.pow(2, attempt) * 500, 8000);
+        showBanner(`Ошибка сервера OpenAI (${res.status}), повтор через ${delay / 1000}с…`);
         await _sleep(delay);
         continue;
       }
-
-      if (!res.ok) {
-        const detail = data?.error || data?.detail?.error?.message || `HTTP ${res.status}`;
-        addMessage(role, tsMs, `[ошибка: ${detail}]`, chunkIndex);
-        if (res.status === 402) {
-          showBanner("Кредиты Lovable AI закончились. Пополните и продолжите.");
-        }
-        return;
-      }
-
-      // Success — hide any rate-limit banner.
-      hideBanner();
-      const text = (data.text || "").trim();
-      if (text && !isLikelyHallucination(text) && isEnglishOrRussian(text)) {
-        addOrMergeMessage(role, tsMs, text, chunkIndex);
-      }
-      // Drop empty / hallucinated / non-RU output silently.
+      addMessage(role, tsMs, `[ошибка: ${errMsg}]`, chunkIndex);
       return;
     }
-  } finally {
-    _releaseSlot();
+
+    // Success — clear any lingering error banner.
+    hideBanner();
+    const text = (data.text || "").trim();
+    if (text && !isLikelyHallucination(text) && isEnglishOrRussian(text)) {
+      addOrMergeMessage(role, tsMs, text, chunkIndex);
+    }
+    return;
   }
 }
 

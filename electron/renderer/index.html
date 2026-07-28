@@ -42,12 +42,22 @@
         />
       </label>
       <label class="endpoint">
-        <span>Backend URL</span>
+        <span>OpenAI API Key</span>
         <input
-          id="endpoint"
-          type="url"
-          placeholder="https://project--ID.lovable.app/api/public/transcribe"
+          id="api-key"
+          type="password"
+          placeholder="sk-..."
+          autocomplete="off"
+          spellcheck="false"
         />
+      </label>
+      <label>
+        <span>Модель транскрипции</span>
+        <select id="model-select">
+          <option value="whisper-1">whisper-1 (быстро, без лимитов)</option>
+          <option value="gpt-4o-transcribe">gpt-4o-transcribe (точнее)</option>
+          <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe (баланс)</option>
+        </select>
       </label>
       <div class="buttons">
         <button id="start" class="btn primary">▶ Начать запись</button>

@@ -78,6 +78,10 @@ body {
   grid-column: 1 / -1;
 }
 
+.controls .full-row {
+  grid-column: 1 / -1;
+}
+
 .controls select,
 .controls input {
   padding: 8px 10px;
