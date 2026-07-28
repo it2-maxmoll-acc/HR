@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, dialog, session } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, session, safeStorage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -154,6 +154,39 @@ ipcMain.handle("get-app-info", () => ({
   platform: process.platform,
   homedir: os.homedir(),
 }));
+
+// -------- secure API key storage --------
+
+function getApiKeyPath() {
+  return path.join(app.getPath("userData"), ".apikey");
+}
+
+ipcMain.handle("store-api-key", (_evt, key) => {
+  const fp = getApiKeyPath();
+  if (!key) {
+    if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    return;
+  }
+  if (safeStorage.isEncryptionAvailable()) {
+    fs.writeFileSync(fp, safeStorage.encryptString(key));
+  } else {
+    fs.writeFileSync(fp, key, "utf8");
+  }
+});
+
+ipcMain.handle("load-api-key", () => {
+  const fp = getApiKeyPath();
+  if (!fs.existsSync(fp)) return "";
+  try {
+    const buf = fs.readFileSync(fp);
+    if (safeStorage.isEncryptionAvailable()) {
+      return safeStorage.decryptString(buf);
+    }
+    return buf.toString("utf8");
+  } catch {
+    return "";
+  }
+});
 
 // -------- overlay window --------
 

@@ -52,9 +52,12 @@ let _autosaveInterval = null;
 
 // -------- init --------
 
-els.apiKey.value = localStorage.getItem("openai-api-key") || "";
+// Load API key from secure (OS-encrypted) storage.
+window.api.loadApiKey?.().then((key) => {
+  if (key) els.apiKey.value = key;
+});
 els.apiKey.addEventListener("change", () =>
-  localStorage.setItem("openai-api-key", els.apiKey.value.trim()),
+  window.api.storeApiKey?.(els.apiKey.value.trim()),
 );
 
 const savedModel = localStorage.getItem("openai-model") || "whisper-1";

@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld("api", {
   deleteSession: (filename) => ipcRenderer.invoke("delete-session", filename),
   loadSession: (filename) => ipcRenderer.invoke("load-session", filename),
 
+  // Secure API key storage (uses OS keychain via Electron safeStorage)
+  storeApiKey: (key) => ipcRenderer.invoke("store-api-key", key),
+  loadApiKey: () => ipcRenderer.invoke("load-api-key"),
+
   // Overlay window
   openOverlay: () => ipcRenderer.invoke("open-overlay"),
   pushTranscriptLine: (msg) => ipcRenderer.invoke("push-transcript-line", msg),
