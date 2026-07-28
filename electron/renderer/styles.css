@@ -300,6 +300,10 @@ body {
   display: none;
 }
 
+label.hidden {
+  display: none;
+}
+
 .log-header {
   display: flex;
   align-items: center;

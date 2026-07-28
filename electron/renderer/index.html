@@ -41,22 +41,29 @@
           value="3"
         />
       </label>
-      <label class="endpoint">
+      <label>
+        <span>Режим подключения</span>
+        <select id="mode-select">
+          <option value="proxy">🌐 Через сервер — для РФ (ключ не нужен)</option>
+          <option value="direct">🔑 Напрямую OpenAI (нужен API Key)</option>
+        </select>
+      </label>
+      <label class="endpoint" id="server-url-row">
+        <span>URL вашего приложения на Lovable</span>
+        <input
+          id="server-url"
+          type="text"
+          placeholder="https://ваш-проект.lovable.app"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </label>
+      <label class="endpoint hidden" id="api-key-row">
         <span>OpenAI API Key</span>
         <input
           id="api-key"
           type="password"
           placeholder="sk-..."
-          autocomplete="off"
-          spellcheck="false"
-        />
-      </label>
-      <label class="endpoint">
-        <span>API Endpoint (базовый URL)</span>
-        <input
-          id="api-base"
-          type="text"
-          placeholder="https://api.openai.com"
           autocomplete="off"
           spellcheck="false"
         />

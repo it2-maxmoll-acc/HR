@@ -15,8 +15,11 @@ const els = {
   timer: document.getElementById("timer"),
   mic: document.getElementById("mic-select"),
   sys: document.getElementById("sys-select"),
+  modeSelect: document.getElementById("mode-select"),
+  serverUrl: document.getElementById("server-url"),
+  serverUrlRow: document.getElementById("server-url-row"),
   apiKey: document.getElementById("api-key"),
-  apiBase: document.getElementById("api-base"),
+  apiKeyRow: document.getElementById("api-key-row"),
   modelSelect: document.getElementById("model-select"),
   start: document.getElementById("start"),
   stop: document.getElementById("stop"),
@@ -61,11 +64,30 @@ els.apiKey.addEventListener("change", () =>
   window.api.storeApiKey?.(els.apiKey.value.trim()),
 );
 
-// Load / persist API base URL.
-const savedApiBase = localStorage.getItem("openai-api-base") || "";
-els.apiBase.value = savedApiBase;
-els.apiBase.addEventListener("change", () =>
-  localStorage.setItem("openai-api-base", els.apiBase.value.trim()),
+// Load / persist connection mode and server URL.
+const savedMode = localStorage.getItem("connection-mode") || "proxy";
+const savedServerUrl = localStorage.getItem("server-url") || "";
+els.modeSelect.value = savedMode;
+els.serverUrl.value = savedServerUrl;
+
+function applyModeUI(mode) {
+  if (mode === "proxy") {
+    els.serverUrlRow.classList.remove("hidden");
+    els.apiKeyRow.classList.add("hidden");
+  } else {
+    els.serverUrlRow.classList.add("hidden");
+    els.apiKeyRow.classList.remove("hidden");
+  }
+}
+applyModeUI(savedMode);
+
+els.modeSelect.addEventListener("change", () => {
+  const mode = els.modeSelect.value;
+  localStorage.setItem("connection-mode", mode);
+  applyModeUI(mode);
+});
+els.serverUrl.addEventListener("change", () =>
+  localStorage.setItem("server-url", els.serverUrl.value.trim()),
 );
 
 const savedModel = localStorage.getItem("openai-model") || "whisper-1";
@@ -572,15 +594,27 @@ function _sleep(ms) {
 // -------- send + render --------
 
 async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
-  const apiKey = (els.apiKey.value || "").trim();
-  if (!apiKey) {
-    showBanner("Введите OpenAI API Key в поле выше, затем начните запись снова.");
-    return;
-  }
-
+  const mode = els.modeSelect.value;
   const model = els.modelSelect.value || "whisper-1";
-  const apiBase = (els.apiBase.value || "").trim().replace(/\/$/, "") || "https://api.openai.com";
-  const OPENAI_ENDPOINT = `${apiBase}/v1/audio/transcriptions`;
+
+  let endpoint, headers;
+  if (mode === "proxy") {
+    const base = (els.serverUrl.value || "").trim().replace(/\/$/, "");
+    if (!base) {
+      showBanner("Укажите URL вашего Lovable-приложения в поле выше, затем начните снова.");
+      return;
+    }
+    endpoint = `${base}/api/public/transcribe`;
+    headers = {};
+  } else {
+    const apiKey = (els.apiKey.value || "").trim();
+    if (!apiKey) {
+      showBanner("Введите OpenAI API Key в поле выше, затем начните запись снова.");
+      return;
+    }
+    endpoint = "https://api.openai.com/v1/audio/transcriptions";
+    headers = { Authorization: "Bearer " + apiKey };
+  }
 
   const form = new FormData();
   form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
@@ -596,9 +630,9 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
   while (true) {
     let res, data;
     try {
-      res = await fetch(OPENAI_ENDPOINT, {
+      res = await fetch(endpoint, {
         method: "POST",
-        headers: { Authorization: "Bearer " + apiKey },
+        headers,
         body: form,
       });
       data = await res.json().catch(() => ({}));
