@@ -236,7 +236,6 @@ function getApiKeyPath() {
 
 function sanitizeSessionFilename(filename) {
   if (typeof filename !== "string") return null;
-  if (filename.includes("\0")) return null;
   const trimmed = filename.trim();
   if (!trimmed) return null;
   if (trimmed.includes("..")) return null;
