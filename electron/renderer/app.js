@@ -479,6 +479,13 @@ const HALLUCINATION_PHRASES = new Set([
   "ну",
 ]);
 
+// Fragments of the Whisper prompt that the model sometimes echoes back verbatim.
+const PROMPT_FRAGMENTS = [
+  "числа пиши арабскими цифрами",
+  "знаки препинания расставляй точно",
+  "пиши каждое слово отдельно",
+];
+
 function isLikelyHallucination(text) {
   const normalized = text
     .toLowerCase()
@@ -490,6 +497,8 @@ function isLikelyHallucination(text) {
   // Very short outputs (<= 3 letters) are almost always noise.
   const lettersOnly = normalized.replace(/[^\p{L}]/gu, "");
   if (lettersOnly.length <= 3) return true;
+  // Reject Whisper prompt echo: model sometimes repeats the prompt on silence.
+  if (PROMPT_FRAGMENTS.some((frag) => normalized.includes(frag))) return true;
   return false;
 }
 
