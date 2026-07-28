@@ -16,6 +16,7 @@ const els = {
   mic: document.getElementById("mic-select"),
   sys: document.getElementById("sys-select"),
   apiKey: document.getElementById("api-key"),
+  apiBase: document.getElementById("api-base"),
   modelSelect: document.getElementById("model-select"),
   start: document.getElementById("start"),
   stop: document.getElementById("stop"),
@@ -58,6 +59,13 @@ window.api.loadApiKey?.().then((key) => {
 });
 els.apiKey.addEventListener("change", () =>
   window.api.storeApiKey?.(els.apiKey.value.trim()),
+);
+
+// Load / persist API base URL.
+const savedApiBase = localStorage.getItem("openai-api-base") || "";
+els.apiBase.value = savedApiBase;
+els.apiBase.addEventListener("change", () =>
+  localStorage.setItem("openai-api-base", els.apiBase.value.trim()),
 );
 
 const savedModel = localStorage.getItem("openai-model") || "whisper-1";
@@ -571,7 +579,8 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
   }
 
   const model = els.modelSelect.value || "whisper-1";
-  const OPENAI_ENDPOINT = "https://api.openai.com/v1/audio/transcriptions";
+  const apiBase = (els.apiBase.value || "").trim().replace(/\/$/, "") || "https://api.openai.com";
+  const OPENAI_ENDPOINT = `${apiBase}/v1/audio/transcriptions`;
 
   const form = new FormData();
   form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
