@@ -507,7 +507,7 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     try {
       res = await fetch(OPENAI_ENDPOINT, {
         method: "POST",
-        headers: { Authorization: `****** },
+        headers: { Authorization: "Bearer " + apiKey },
         body: form,
       });
       data = await res.json().catch(() => ({}));
@@ -535,8 +535,10 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     }
 
     if (!res.ok) {
+      const rawErr = data?.error;
       const errMsg =
-        data?.error?.message || data?.error || `HTTP ${res.status}`;
+        (rawErr && typeof rawErr === "object" ? rawErr.message : rawErr) ||
+        `HTTP ${res.status}`;
       // Transient server error — retry a few times before giving up.
       if (res.status >= 500 && attempt < 5) {
         attempt++;
