@@ -14,6 +14,26 @@ npm install
 npm run start:electron
 ```
 
+## Прокси (без хардкода в коде)
+
+1. Скопируйте шаблон:
+
+```bash
+cp electron/proxy.config.example.json electron/proxy.config.local.json
+```
+
+2. Заполните `password` в `electron/proxy.config.local.json`.
+3. Приложение автоматически подхватит прокси при старте.
+
+Приоритет загрузки конфига:
+
+1. `RT_PROXY_CONFIG` (абсолютный путь к JSON-файлу),
+2. `%APPDATA%/Realtime Transcriber/proxy.config.json`,
+3. `electron/proxy.config.local.json` (для разработки).
+
+Поддерживаются `http`, `https`, `socks5`, а также авторизация через
+`username/password`.
+
 В открывшемся окне:
 
 1. Выберите микрофон (это будет **HR**).

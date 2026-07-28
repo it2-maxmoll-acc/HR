@@ -9,6 +9,62 @@ const isDev = !app.isPackaged;
 
 let overlayWin = null;
 let mainWin = null;
+let proxyAuth = null;
+
+function readJsonIfExists(fp) {
+  try {
+    if (!fp || !fs.existsSync(fp)) return null;
+    const raw = fs.readFileSync(fp, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function loadProxyConfig() {
+  const explicitConfigPath = process.env.RT_PROXY_CONFIG;
+  const candidatePaths = [
+    explicitConfigPath,
+    path.join(app.getPath("userData"), "proxy.config.json"),
+    path.join(__dirname, "proxy.config.local.json"),
+  ].filter(Boolean);
+
+  for (const fp of candidatePaths) {
+    const parsed = readJsonIfExists(fp);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+async function configureProxy(sess) {
+  const cfg = loadProxyConfig();
+  if (!cfg?.enabled) return;
+
+  const protocol = String(cfg.protocol || "http").toLowerCase();
+  const host = String(cfg.host || "").trim();
+  const port = Number(cfg.port);
+  if (!host || !Number.isFinite(port) || port <= 0) return;
+
+  const proxyRules = `${protocol}://${host}:${port}`;
+  const proxyBypassRules =
+    Array.isArray(cfg.bypass) && cfg.bypass.length > 0
+      ? cfg.bypass.map((x) => String(x).trim()).filter(Boolean).join(";")
+      : "<local>";
+
+  await sess.setProxy({
+    proxyRules,
+    proxyBypassRules,
+  });
+
+  const username = String(cfg.username || "").trim();
+  const password = String(cfg.password || "");
+  proxyAuth = username
+    ? {
+        username,
+        password,
+      }
+    : null;
+}
 
 function createWindow() {
   mainWin = new BrowserWindow({
@@ -38,7 +94,13 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  try {
+    await configureProxy(session.defaultSession);
+  } catch (e) {
+    console.error("Failed to configure proxy:", e?.message || e);
+  }
+
   // Allow the renderer to request microphone and desktop audio without extra prompts.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
     if (permission === "media") return cb(true);
@@ -68,6 +130,12 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on("login", (event, _webContents, _request, authInfo, callback) => {
+  if (!authInfo?.isProxy || !proxyAuth?.username) return;
+  event.preventDefault();
+  callback(proxyAuth.username, proxyAuth.password || "");
 });
 
 app.on("window-all-closed", () => {
