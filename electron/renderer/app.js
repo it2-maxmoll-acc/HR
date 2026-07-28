@@ -474,6 +474,36 @@ function writeStr(view, offset, str) {
   for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
 }
 
+// -------- request throttle --------
+
+const MAX_CONCURRENT = 2;
+let _activeRequests = 0;
+const _requestQueue = [];
+
+function _acquireSlot() {
+  return new Promise((resolve) => {
+    if (_activeRequests < MAX_CONCURRENT) {
+      _activeRequests++;
+      resolve();
+    } else {
+      _requestQueue.push(resolve);
+    }
+  });
+}
+
+function _releaseSlot() {
+  const next = _requestQueue.shift();
+  if (next) {
+    next();
+  } else {
+    _activeRequests--;
+  }
+}
+
+function _sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 // -------- send + render --------
 
 async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
@@ -489,28 +519,55 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     "Числа пиши арабскими цифрами. Знаки препинания расставляй точно. Пиши каждое слово отдельно.",
   );
 
+  const MAX_RETRIES = 3;
+  let attempt = 0;
+
+  await _acquireSlot();
   try {
-    const res = await fetch(endpoint, { method: "POST", body: form });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const detail = data?.error || data?.detail?.error?.message || `HTTP ${res.status}`;
-      addMessage(role, tsMs, `[ошибка: ${detail}]`, chunkIndex);
-      if (res.status === 402) {
-        showBanner("Кредиты Lovable AI закончились. Пополните и продолжите.");
-      } else if (res.status === 429) {
-        showBanner("Слишком много запросов, замедляем поток.");
+    while (attempt <= MAX_RETRIES) {
+      let res, data;
+      try {
+        res = await fetch(endpoint, { method: "POST", body: form });
+        data = await res.json().catch(() => ({}));
+      } catch (e) {
+        addMessage(role, tsMs, "[сеть недоступна]", chunkIndex);
+        return;
       }
-    } else {
+
+      if (res.status === 429) {
+        attempt++;
+        if (attempt > MAX_RETRIES) {
+          // Silently drop — don't pollute transcript with rate-limit errors.
+          showBanner("Слишком много запросов, замедляем поток.");
+          return;
+        }
+        // Exponential backoff: 1s, 2s, 4s
+        const delay = Math.pow(2, attempt - 1) * 1000;
+        showBanner("Слишком много запросов, повтор через " + delay / 1000 + "с…");
+        await _sleep(delay);
+        continue;
+      }
+
+      if (!res.ok) {
+        const detail = data?.error || data?.detail?.error?.message || `HTTP ${res.status}`;
+        addMessage(role, tsMs, `[ошибка: ${detail}]`, chunkIndex);
+        if (res.status === 402) {
+          showBanner("Кредиты Lovable AI закончились. Пополните и продолжите.");
+        }
+        return;
+      }
+
+      // Success — hide any rate-limit banner.
+      hideBanner();
       const text = (data.text || "").trim();
       if (text && !isLikelyHallucination(text) && isEnglishOrRussian(text)) {
         addOrMergeMessage(role, tsMs, text, chunkIndex);
-      } else {
-        // Drop empty, hallucinated, or non-RU output.
-        return;
       }
+      // Drop empty / hallucinated / non-RU output silently.
+      return;
     }
-  } catch (e) {
-    addMessage(role, tsMs, "[сеть недоступна]", chunkIndex);
+  } finally {
+    _releaseSlot();
   }
 }
 
