@@ -181,10 +181,11 @@ ipcMain.handle("autosave-transcript", async (_evt, payload) => {
 
 ipcMain.handle("autosave-to-session", async (_evt, payload) => {
   const { filename, content } = payload || {};
-  if (!content || !filename) return { saved: false };
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!content || !safeFilename) return { saved: false };
   const dir = path.join(app.getPath("userData"), "sessions");
   fs.mkdirSync(dir, { recursive: true });
-  const fp = path.join(dir, path.basename(filename)); // basename prevents path traversal
+  const fp = path.join(dir, safeFilename);
   fs.writeFileSync(fp, content, "utf8");
   return { saved: true, path: fp };
 });
@@ -204,15 +205,19 @@ ipcMain.handle("list-sessions", async () => {
 });
 
 ipcMain.handle("delete-session", async (_evt, filename) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { ok: false };
   const dir = path.join(app.getPath("userData"), "sessions");
-  const fp = path.join(dir, path.basename(filename));
+  const fp = path.join(dir, safeFilename);
   if (fs.existsSync(fp)) fs.unlinkSync(fp);
   return { ok: true };
 });
 
 ipcMain.handle("load-session", async (_evt, filename) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { content: "" };
   const dir = path.join(app.getPath("userData"), "sessions");
-  const fp = path.join(dir, path.basename(filename));
+  const fp = path.join(dir, safeFilename);
   if (!fs.existsSync(fp)) return { content: "" };
   return { content: fs.readFileSync(fp, "utf8") };
 });
@@ -227,6 +232,18 @@ ipcMain.handle("get-app-info", () => ({
 
 function getApiKeyPath() {
   return path.join(app.getPath("userData"), ".apikey");
+}
+
+function sanitizeSessionFilename(filename) {
+  if (typeof filename !== "string") return null;
+  if (filename.includes("\0")) return null;
+  const trimmed = filename.trim();
+  if (!trimmed) return null;
+  const base = path.basename(trimmed);
+  if (base !== trimmed) return null;
+  if (/[<>:"/\\|?*\x00-\x1F]/.test(base)) return null;
+  if (!base.endsWith(".txt")) return null;
+  return base;
 }
 
 ipcMain.handle("store-api-key", (_evt, key) => {
