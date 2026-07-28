@@ -8,9 +8,10 @@ const os = require("os");
 const isDev = !app.isPackaged;
 
 let overlayWin = null;
+let mainWin = null;
 
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWin = new BrowserWindow({
     width: 1100,
     height: 780,
     title: "Realtime Transcriber",
@@ -24,15 +25,16 @@ function createWindow() {
     },
   });
 
-  win.loadFile(path.join(__dirname, "renderer", "index.html"));
+  mainWin.loadFile(path.join(__dirname, "renderer", "index.html"));
 
   // Close overlay when the main window closes.
-  win.on("closed", () => {
+  mainWin.on("closed", () => {
+    mainWin = null;
     if (overlayWin && !overlayWin.isDestroyed()) overlayWin.close();
   });
 
   if (isDev) {
-    win.webContents.openDevTools({ mode: "detach" });
+    mainWin.webContents.openDevTools({ mode: "detach" });
   }
 }
 
@@ -86,7 +88,7 @@ ipcMain.handle("save-transcript", async (_evt, payload) => {
     (defaultName && String(defaultName)) ||
     `Транскрипция_${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.txt`;
 
-  const win = BrowserWindow.getFocusedWindow();
+  const win = mainWin || BrowserWindow.getFocusedWindow();
   const res = await dialog.showSaveDialog(win, {
     title: "Сохранить расшифровку",
     defaultPath: path.join(app.getPath("documents"), safeName),
@@ -107,6 +109,44 @@ ipcMain.handle("autosave-transcript", async (_evt, payload) => {
   const file = path.join(dir, `session_${stamp}.txt`);
   fs.writeFileSync(file, content, "utf8");
   return { saved: true, path: file };
+});
+
+ipcMain.handle("autosave-to-session", async (_evt, payload) => {
+  const { filename, content } = payload || {};
+  if (!content || !filename) return { saved: false };
+  const dir = path.join(app.getPath("userData"), "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  const fp = path.join(dir, path.basename(filename)); // basename prevents path traversal
+  fs.writeFileSync(fp, content, "utf8");
+  return { saved: true, path: fp };
+});
+
+ipcMain.handle("list-sessions", async () => {
+  const dir = path.join(app.getPath("userData"), "sessions");
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".txt"))
+    .map((f) => {
+      const fp = path.join(dir, f);
+      const stat = fs.statSync(fp);
+      return { filename: f, size: stat.size, mtime: stat.mtimeMs };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+});
+
+ipcMain.handle("delete-session", async (_evt, filename) => {
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const fp = path.join(dir, path.basename(filename));
+  if (fs.existsSync(fp)) fs.unlinkSync(fp);
+  return { ok: true };
+});
+
+ipcMain.handle("load-session", async (_evt, filename) => {
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const fp = path.join(dir, path.basename(filename));
+  if (!fs.existsSync(fp)) return { content: "" };
+  return { content: fs.readFileSync(fp, "utf8") };
 });
 
 ipcMain.handle("get-app-info", () => ({
@@ -156,5 +196,19 @@ ipcMain.handle("push-transcript-line", (_evt, msg) => {
 ipcMain.handle("clear-lines", () => {
   if (overlayWin && !overlayWin.isDestroyed()) {
     overlayWin.webContents.send("clear-lines");
+  }
+});
+
+// Forward recording control actions from overlay → main window.
+ipcMain.handle("recording-control", async (_evt, action) => {
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.webContents.send("recording-control", action);
+  }
+});
+
+// Forward recording state from main window → overlay.
+ipcMain.handle("push-recording-state", async (_evt, state) => {
+  if (overlayWin && !overlayWin.isDestroyed()) {
+    overlayWin.webContents.send("recording-state", state);
   }
 });

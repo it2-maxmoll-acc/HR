@@ -145,6 +145,139 @@ body {
   cursor: not-allowed;
 }
 
+.btn.pause {
+  background: #4a3f20;
+  color: #f0c040;
+  border-color: #6b5a2a;
+}
+.btn.pause:hover:not(:disabled) {
+  background: #6b5a2a;
+}
+
+.btn.small {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* -------- history panel -------- */
+
+.history-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 420px;
+  height: 100vh;
+  background: #0f1216;
+  border-left: 1px solid #1e232a;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.5);
+}
+
+.history-panel.hidden {
+  display: none;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1e232a;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.history-loading {
+  padding: 20px 16px;
+  color: #9aa4af;
+  font-size: 13px;
+}
+
+.history-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid #1a1f26;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-row:hover {
+  background: #141820;
+}
+
+.history-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.history-name {
+  font-size: 13px;
+  color: #e6e8eb;
+}
+
+.history-size {
+  font-size: 11px;
+  color: #5a6370;
+}
+
+.history-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.history-btn {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* Session text viewer (overlays the history panel) */
+
+.history-viewer {
+  position: absolute;
+  inset: 0;
+  background: #0f1216;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+.history-viewer.hidden {
+  display: none;
+}
+
+.history-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #1e232a;
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.history-viewer-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #b0b8c4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  font-family: inherit;
+}
+
 .btn.download {
   background: #2a6b3a;
   color: #fff;

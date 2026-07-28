@@ -38,6 +38,60 @@ body {
   -webkit-app-region: drag;
 }
 
+/* Control buttons bar */
+.controls-bar {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(15, 18, 22, 0.85);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.ov-btn {
+  flex: 1;
+  padding: 5px 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-app-region: no-drag;
+}
+
+.ov-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ov-btn.start {
+  background: #1e3c6b;
+  color: #a9c8ff;
+  border-color: #2a4f8a;
+}
+.ov-btn.start:hover:not(:disabled) {
+  background: #2a5096;
+}
+
+.ov-btn.pause {
+  background: #3a2f10;
+  color: #f0c040;
+  border-color: #5a4a1a;
+}
+.ov-btn.pause:hover:not(:disabled) {
+  background: #5a4a1a;
+}
+
+.ov-btn.stop {
+  background: #5a1a1a;
+  color: #ffaaaa;
+  border-color: #7a2a2a;
+}
+.ov-btn.stop:hover:not(:disabled) {
+  background: #7a2a2a;
+}
+
 .brand {
   font-size: 12px;
   font-weight: 600;

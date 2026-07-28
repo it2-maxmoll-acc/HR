@@ -62,8 +62,10 @@
       <div class="buttons">
         <button id="start" class="btn primary">▶ Начать запись</button>
         <button id="stop" class="btn danger" disabled>■ Остановить</button>
+        <button id="pause" class="btn pause" disabled>⏸ Пауза</button>
         <button id="save" class="btn ghost" disabled>💾 Сохранить .txt</button>
         <button id="overlay" class="btn ghost">📌 Оверлей</button>
+        <button id="history" class="btn ghost">🕐 История</button>
       </div>
     </section>
 
@@ -77,6 +79,23 @@
     </div>
 
     <main id="log" class="log" aria-live="polite"></main>
+
+    <!-- ====== History panel ====== -->
+    <div id="history-panel" class="history-panel hidden">
+      <div class="history-header">
+        <span>История записей</span>
+        <button id="history-close" class="btn ghost small">✕ Закрыть</button>
+      </div>
+      <div id="history-list" class="history-list"></div>
+      <!-- Session text viewer -->
+      <div id="history-viewer" class="history-viewer hidden">
+        <div class="history-viewer-header">
+          <span>Просмотр записи</span>
+          <button id="history-viewer-close" class="btn ghost small">✕</button>
+        </div>
+        <pre id="history-viewer-content" class="history-viewer-content"></pre>
+      </div>
+    </div>
 
     <script type="module" src="app.js"></script>
   </body>

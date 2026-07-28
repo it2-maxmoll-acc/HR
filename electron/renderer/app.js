@@ -19,6 +19,7 @@ const els = {
   modelSelect: document.getElementById("model-select"),
   start: document.getElementById("start"),
   stop: document.getElementById("stop"),
+  pause: document.getElementById("pause"),
   save: document.getElementById("save"),
   download: document.getElementById("download"),
   banner: document.getElementById("banner"),
@@ -26,16 +27,28 @@ const els = {
   sensitivity: document.getElementById("sensitivity"),
   sensValue: document.getElementById("sens-value"),
   overlay: document.getElementById("overlay"),
+  history: document.getElementById("history"),
+  historyPanel: document.getElementById("history-panel"),
+  historyList: document.getElementById("history-list"),
+  historyClose: document.getElementById("history-close"),
+  historyViewer: document.getElementById("history-viewer"),
+  historyViewerContent: document.getElementById("history-viewer-content"),
+  historyViewerClose: document.getElementById("history-viewer-close"),
 };
 
 const state = {
   recording: false,
+  paused: false,
   startedAt: 0,
   timerInterval: null,
   captures: [], // { role, stream, audioCtx, source, processor, buffer, chunkIndex }
   messages: [], // { role, tsMs, lastTsMs, text, id }
   nextId: 1,
 };
+
+// Current session file for autosave (set on start, cleared on stop).
+let _currentSessionFile = null;
+let _autosaveInterval = null;
 
 // -------- init --------
 
@@ -114,9 +127,20 @@ els.mic.addEventListener("change", () => localStorage.setItem("mic-source", els.
 
 els.start.addEventListener("click", () => start().catch(handleFatal));
 els.stop.addEventListener("click", () => stop().catch(handleFatal));
+els.pause.addEventListener("click", togglePause);
 els.save.addEventListener("click", () => saveTranscript(false));
 els.download.addEventListener("click", () => saveTranscript(false));
 els.overlay.addEventListener("click", () => window.api.openOverlay?.());
+els.history.addEventListener("click", openHistoryPanel);
+els.historyClose.addEventListener("click", closeHistoryPanel);
+els.historyViewerClose.addEventListener("click", () => els.historyViewer.classList.add("hidden"));
+
+// Receive recording-control actions sent from the overlay buttons.
+window.api.onRecordingControl?.((action) => {
+  if (action === "start") start().catch(handleFatal);
+  else if (action === "stop") stop().catch(handleFatal);
+  else if (action === "pause") togglePause();
+});
 
 function handleFatal(e) {
   console.error(e);
@@ -144,18 +168,31 @@ async function start() {
   hideBanner();
   els.start.disabled = true;
   els.stop.disabled = false;
+  els.pause.disabled = false;
   els.save.disabled = false;
 
   state.recording = true;
-  state.startedAt = performance.now();
-  state.messages = [];
-  state.nextId = 1;
-  els.log.innerHTML = "";
-  window.api.clearLines?.();
+  state.paused = false;
+
+  // Only reset messages/timer if not continuing from a loaded session.
+  if (!_currentSessionFile) {
+    state.startedAt = performance.now();
+    state.messages = [];
+    state.nextId = 1;
+    els.log.innerHTML = "";
+    window.api.clearLines?.();
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    _currentSessionFile = `session_${stamp}.txt`;
+  }
   toggleDownload();
 
   updateStatus(true);
   state.timerInterval = setInterval(tickTimer, 500);
+
+  // Autosave every 5 minutes so nothing is lost if the PC shuts down.
+  _autosaveInterval = setInterval(periodicAutosave, 5 * 60 * 1000);
+
+  window.api.pushRecordingState?.({ recording: true, paused: false });
 
   // Mic
   const micDeviceId = els.mic.value;
@@ -229,10 +266,13 @@ async function start() {
 async function stop() {
   if (!state.recording) return;
   state.recording = false;
+  state.paused = false;
   updateStatus(false);
 
   clearInterval(state.timerInterval);
   state.timerInterval = null;
+  clearInterval(_autosaveInterval);
+  _autosaveInterval = null;
 
   // Flush and tear down each capture.
   for (const cap of state.captures) {
@@ -254,24 +294,52 @@ async function stop() {
 
   els.start.disabled = false;
   els.stop.disabled = true;
+  els.pause.disabled = true;
+  els.pause.textContent = "⏸ Пауза";
 
-  // Autosave.
+  window.api.pushRecordingState?.({ recording: false, paused: false });
+
+  // Save to current session file and clear it.
   try {
     const content = buildTranscriptText();
-    if (content.trim()) {
-      await window.api.autosaveTranscript({ content });
+    if (content.trim() && _currentSessionFile) {
+      await window.api.autosaveToSession({ filename: _currentSessionFile, content });
     }
   } catch (e) {
-    console.warn("autosave", e);
+    console.warn("autosave on stop", e);
   }
+  _currentSessionFile = null;
 
-  // Prompt user to save.
+  // Prompt user to save as .txt.
   await saveTranscript(true);
 }
 
 function updateStatus(recording) {
-  els.status.textContent = recording ? "● Идёт запись" : "Готов к записи";
-  els.status.classList.toggle("recording", recording);
+  els.status.textContent = recording
+    ? state.paused
+      ? "⏸ Пауза"
+      : "● Идёт запись"
+    : "Готов к записи";
+  els.status.classList.toggle("recording", recording && !state.paused);
+}
+
+function togglePause() {
+  if (!state.recording) return;
+  state.paused = !state.paused;
+  els.pause.textContent = state.paused ? "▶ Продолжить" : "⏸ Пауза";
+  updateStatus(true);
+  window.api.pushRecordingState?.({ recording: true, paused: state.paused });
+}
+
+async function periodicAutosave() {
+  if (!_currentSessionFile) return;
+  const content = buildTranscriptText();
+  if (!content.trim()) return;
+  try {
+    await window.api.autosaveToSession({ filename: _currentSessionFile, content });
+  } catch (e) {
+    console.warn("periodic autosave", e);
+  }
 }
 
 function tickTimer() {
@@ -306,7 +374,7 @@ async function startCapture(role, stream) {
   const overlapSamples = Math.round((audioCtx.sampleRate * OVERLAP_MS) / 1000);
 
   processor.onaudioprocess = (e) => {
-    if (!state.recording) return;
+    if (!state.recording || state.paused) return;
     const input = e.inputBuffer.getChannelData(0);
     // Copy — the buffer is reused by the API.
     cap.buffer.push(new Float32Array(input));
@@ -422,18 +490,20 @@ function isLikelyHallucination(text) {
   return false;
 }
 
-// Keep only transcripts that look like English or Russian.
-// Anything dominated by CJK / Korean / Arabic / etc is a hallucination on silence.
-function isEnglishOrRussian(text) {
+// Accept only transcripts that contain enough Cyrillic characters (Russian).
+// This blocks Turkish, Arabic, Korean, and other languages that the model
+// can hallucinate when processing noise or silence.
+function hasEnoughCyrillic(text) {
   if (!text) return false;
   const letters = text.match(/\p{L}/gu) || [];
   if (letters.length === 0) return false;
-  let good = 0;
+  let cyrillic = 0;
   for (const ch of letters) {
-    // Latin (English) or Cyrillic (Russian)
-    if (/[A-Za-z\u0400-\u04FF]/.test(ch)) good++;
+    if (/[\u0400-\u04FF]/.test(ch)) cyrillic++;
   }
-  return good / letters.length >= 0.6;
+  // Require at least 40% Cyrillic so Russian sentences with occasional
+  // English proper nouns pass, while purely foreign-language outputs are dropped.
+  return cyrillic / letters.length >= 0.4;
 }
 
 function mergeFloat32(chunks, totalLen) {
@@ -554,7 +624,7 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     // Success — clear any lingering error banner.
     hideBanner();
     const text = (data.text || "").trim();
-    if (text && !isLikelyHallucination(text) && isEnglishOrRussian(text)) {
+    if (text && !isLikelyHallucination(text) && hasEnoughCyrillic(text)) {
       addOrMergeMessage(role, tsMs, text, chunkIndex);
     }
     return;
@@ -701,4 +771,142 @@ async function saveTranscript(afterStop) {
   } catch (e) {
     showBanner("Не удалось сохранить: " + e.message);
   }
+}
+
+// -------- history panel --------
+
+async function openHistoryPanel() {
+  els.historyPanel.classList.remove("hidden");
+  await refreshHistoryList();
+}
+
+function closeHistoryPanel() {
+  els.historyPanel.classList.add("hidden");
+  els.historyViewer.classList.add("hidden");
+}
+
+async function refreshHistoryList() {
+  els.historyList.innerHTML = '<p class="history-loading">Загрузка…</p>';
+  let sessions = [];
+  try {
+    sessions = await window.api.listSessions();
+  } catch (e) {
+    els.historyList.innerHTML = '<p class="history-loading">Ошибка загрузки истории.</p>';
+    return;
+  }
+  if (sessions.length === 0) {
+    els.historyList.innerHTML = '<p class="history-loading">Сохранённых записей нет.</p>';
+    return;
+  }
+  els.historyList.innerHTML = "";
+  for (const s of sessions) {
+    const row = document.createElement("div");
+    row.className = "history-row";
+
+    // Format filename → readable date
+    const datePart = s.filename.replace(/^session_/, "").replace(/\.txt$/, "");
+    // datePart: 2026-07-28T12-30-45 → 28.07.2026 12:30:45
+    const label = formatSessionDate(datePart);
+    const kb = Math.round(s.size / 1024 * 10) / 10;
+
+    row.innerHTML =
+      `<div class="history-info">` +
+        `<span class="history-name">${label}</span>` +
+        `<span class="history-size">${kb} КБ</span>` +
+      `</div>` +
+      `<div class="history-actions">` +
+        `<button class="btn ghost history-btn" data-action="view" data-file="${s.filename}">Открыть</button>` +
+        `<button class="btn primary history-btn" data-action="continue" data-file="${s.filename}">Продолжить</button>` +
+        `<button class="btn danger history-btn" data-action="delete" data-file="${s.filename}">Удалить</button>` +
+      `</div>`;
+    els.historyList.appendChild(row);
+  }
+
+  els.historyList.addEventListener("click", onHistoryAction);
+}
+
+async function onHistoryAction(e) {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const filename = btn.dataset.file;
+
+  if (action === "delete") {
+    if (!confirm(`Удалить запись «${formatSessionDate(filename.replace(/^session_|\.txt$/g, ""))}»?`)) return;
+    try {
+      await window.api.deleteSession(filename);
+      await refreshHistoryList();
+    } catch (err) {
+      showBanner("Не удалось удалить: " + err.message);
+    }
+    return;
+  }
+
+  let content = "";
+  try {
+    const res = await window.api.loadSession(filename);
+    content = res.content || "";
+  } catch (err) {
+    showBanner("Не удалось открыть: " + err.message);
+    return;
+  }
+
+  if (action === "view") {
+    els.historyViewerContent.textContent = content || "(пусто)";
+    els.historyViewer.classList.remove("hidden");
+    return;
+  }
+
+  if (action === "continue") {
+    if (state.recording) {
+      showBanner("Сначала остановите текущую запись.");
+      return;
+    }
+    // Parse existing messages from file and restore them.
+    const loaded = parseTranscriptContent(content);
+    state.messages = loaded;
+    state.nextId = loaded.length + 1;
+    els.log.innerHTML = "";
+    for (const msg of loaded) {
+      renderMessage(msg);
+    }
+    // Offset timer so new recording continues from where old one left off.
+    const maxTs = loaded.reduce((m, msg) => Math.max(m, msg.tsMs), 0);
+    state.startedAt = performance.now() - maxTs - 2000;
+    _currentSessionFile = filename;
+    closeHistoryPanel();
+    showBanner("Продолжение записи «" + formatSessionDate(filename.replace(/^session_|\.txt$/g, "")) + "». Нажмите «Начать запись».");
+  }
+}
+
+function parseTranscriptContent(content) {
+  const messages = [];
+  const lines = content.split("\n");
+  const RE = /^\[(\d{2}):(\d{2})\]\s+(HR|Кандидат):\s+(.+)$/;
+  for (const line of lines) {
+    const m = line.match(RE);
+    if (!m) continue;
+    const tsMs = (parseInt(m[1]) * 60 + parseInt(m[2])) * 1000;
+    messages.push({
+      id: messages.length + 1,
+      role: m[3],
+      tsMs,
+      lastTsMs: tsMs,
+      text: m[4].trim(),
+      chunkIndex: 0,
+    });
+  }
+  return messages;
+}
+
+function formatSessionDate(datePart) {
+  // datePart: "2026-07-28-12-30-45"
+  const parts = datePart.split("-");
+  if (parts.length >= 6) {
+    return `${parts[2]}.${parts[1]}.${parts[0]} ${parts[3]}:${parts[4]}:${parts[5]}`;
+  }
+  if (parts.length >= 3) {
+    return `${parts[2]}.${parts[1]}.${parts[0]}`;
+  }
+  return datePart;
 }
