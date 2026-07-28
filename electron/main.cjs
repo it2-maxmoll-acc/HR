@@ -239,6 +239,7 @@ function sanitizeSessionFilename(filename) {
   if (filename.includes("\0")) return null;
   const trimmed = filename.trim();
   if (!trimmed) return null;
+  if (trimmed.includes("..")) return null;
   const base = path.basename(trimmed);
   if (base !== trimmed) return null;
   if (/[<>:"/\\|?*\x00-\x1F]/.test(base)) return null;
