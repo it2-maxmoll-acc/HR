@@ -41,24 +41,7 @@
           value="3"
         />
       </label>
-      <label>
-        <span>Режим подключения</span>
-        <select id="mode-select">
-          <option value="proxy">🌐 Через сервер — для РФ (ключ не нужен)</option>
-          <option value="direct">🔑 Напрямую OpenAI (нужен API Key)</option>
-        </select>
-      </label>
-      <label class="endpoint" id="server-url-row">
-        <span>URL вашего приложения на Lovable</span>
-        <input
-          id="server-url"
-          type="text"
-          placeholder="https://ea3a71b5-4e0b-4c46-958e-e3204c5abc7d.lovable.app"
-          autocomplete="off"
-          spellcheck="false"
-        />
-      </label>
-      <label class="endpoint hidden" id="api-key-row">
+      <label class="endpoint" id="api-key-row">
         <span>OpenAI API Key</span>
         <input
           id="api-key"
@@ -83,6 +66,7 @@
         <button id="save" class="btn ghost" disabled>💾 Сохранить .txt</button>
         <button id="overlay" class="btn ghost">📌 Оверлей</button>
         <button id="history" class="btn ghost">🕐 История</button>
+        <button id="logs-btn" class="btn ghost">📋 Логи</button>
       </div>
     </section>
 
@@ -112,6 +96,19 @@
         </div>
         <pre id="history-viewer-content" class="history-viewer-content"></pre>
       </div>
+    </div>
+
+    <!-- ====== Logs panel ====== -->
+    <div id="logs-panel" class="history-panel hidden">
+      <div class="history-header">
+        <span>Системные логи</span>
+        <div style="display:flex;gap:8px">
+          <button id="logs-copy" class="btn ghost small">📋 Копировать</button>
+          <button id="logs-clear" class="btn ghost small">🗑 Очистить</button>
+          <button id="logs-close" class="btn ghost small">✕ Закрыть</button>
+        </div>
+      </div>
+      <div id="logs-list" class="logs-list"></div>
     </div>
 
     <script type="module" src="app.js"></script>

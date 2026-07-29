@@ -15,9 +15,6 @@ const els = {
   timer: document.getElementById("timer"),
   mic: document.getElementById("mic-select"),
   sys: document.getElementById("sys-select"),
-  modeSelect: document.getElementById("mode-select"),
-  serverUrl: document.getElementById("server-url"),
-  serverUrlRow: document.getElementById("server-url-row"),
   apiKey: document.getElementById("api-key"),
   apiKeyRow: document.getElementById("api-key-row"),
   modelSelect: document.getElementById("model-select"),
@@ -38,6 +35,12 @@ const els = {
   historyViewer: document.getElementById("history-viewer"),
   historyViewerContent: document.getElementById("history-viewer-content"),
   historyViewerClose: document.getElementById("history-viewer-close"),
+  logsBtn: document.getElementById("logs-btn"),
+  logsPanel: document.getElementById("logs-panel"),
+  logsList: document.getElementById("logs-list"),
+  logsClose: document.getElementById("logs-close"),
+  logsCopy: document.getElementById("logs-copy"),
+  logsClear: document.getElementById("logs-clear"),
 };
 
 const state = {
@@ -62,36 +65,6 @@ window.api.loadApiKey?.().then((key) => {
 });
 els.apiKey.addEventListener("change", () =>
   window.api.storeApiKey?.(els.apiKey.value.trim()),
-);
-
-// Load / persist connection mode and server URL.
-const DEFAULT_SERVER_URL = "https://ea3a71b5-4e0b-4c46-958e-e3204c5abc7d.lovable.app";
-const savedMode = localStorage.getItem("connection-mode") || "proxy";
-// If user previously saved a wrong/mistyped URL, reset to default.
-const _rawSavedUrl = localStorage.getItem("server-url") || DEFAULT_SERVER_URL;
-const savedServerUrl = _rawSavedUrl.includes(".lovable.app") ? _rawSavedUrl : DEFAULT_SERVER_URL;
-if (savedServerUrl !== _rawSavedUrl) localStorage.setItem("server-url", savedServerUrl);
-els.modeSelect.value = savedMode;
-els.serverUrl.value = savedServerUrl;
-
-function applyModeUI(mode) {
-  if (mode === "proxy") {
-    els.serverUrlRow.classList.remove("hidden");
-    els.apiKeyRow.classList.add("hidden");
-  } else {
-    els.serverUrlRow.classList.add("hidden");
-    els.apiKeyRow.classList.remove("hidden");
-  }
-}
-applyModeUI(savedMode);
-
-els.modeSelect.addEventListener("change", () => {
-  const mode = els.modeSelect.value;
-  localStorage.setItem("connection-mode", mode);
-  applyModeUI(mode);
-});
-els.serverUrl.addEventListener("change", () =>
-  localStorage.setItem("server-url", els.serverUrl.value.trim()),
 );
 
 const savedModel = localStorage.getItem("openai-model") || "whisper-1";
@@ -171,8 +144,75 @@ els.overlay.addEventListener("click", () => window.api.openOverlay?.());
 els.history.addEventListener("click", openHistoryPanel);
 els.historyClose.addEventListener("click", closeHistoryPanel);
 els.historyViewerClose.addEventListener("click", () => els.historyViewer.classList.add("hidden"));
+els.logsBtn.addEventListener("click", openLogsPanel);
+els.logsClose.addEventListener("click", closeLogsPanel);
+els.logsClear.addEventListener("click", clearLogs);
+els.logsCopy.addEventListener("click", copyLogs);
 
-// Receive recording-control actions sent from the overlay buttons.
+// -------- logging system --------
+
+const _logs = [];
+
+(function patchConsole() {
+  const levels = { log: "info", info: "info", warn: "warn", error: "error", debug: "debug" };
+  for (const [method, level] of Object.entries(levels)) {
+    const orig = console[method].bind(console);
+    console[method] = (...args) => {
+      orig(...args);
+      const msg = args
+        .map((a) => {
+          if (a instanceof Error) return a.stack || String(a);
+          if (typeof a === "object") {
+            try { return JSON.stringify(a, null, 2); } catch { return String(a); }
+          }
+          return String(a);
+        })
+        .join(" ");
+      pushLog(level, msg);
+    };
+  }
+})();
+
+function pushLog(level, msg) {
+  const entry = { level, msg, ts: new Date().toISOString().slice(11, 23) };
+  _logs.push(entry);
+  if (_logs.length > 500) _logs.shift();
+  // If logs panel is open — append immediately.
+  if (!els.logsPanel.classList.contains("hidden")) {
+    appendLogRow(entry);
+  }
+}
+
+function appendLogRow(entry) {
+  const row = document.createElement("div");
+  row.className = `log-entry log-entry-${entry.level}`;
+  row.textContent = `[${entry.ts}] [${entry.level.toUpperCase()}] ${entry.msg}`;
+  els.logsList.appendChild(row);
+  els.logsList.scrollTop = els.logsList.scrollHeight;
+}
+
+function openLogsPanel() {
+  els.historyPanel.classList.add("hidden");
+  els.logsList.innerHTML = "";
+  for (const entry of _logs) appendLogRow(entry);
+  els.logsPanel.classList.remove("hidden");
+}
+
+function closeLogsPanel() {
+  els.logsPanel.classList.add("hidden");
+}
+
+function clearLogs() {
+  _logs.length = 0;
+  els.logsList.innerHTML = "";
+}
+
+function copyLogs() {
+  const text = _logs.map((e) => `[${e.ts}] [${e.level.toUpperCase()}] ${e.msg}`).join("\n");
+  navigator.clipboard.writeText(text).catch(() => {});
+}
+
+
 window.api.onRecordingControl?.((action) => {
   if (action === "start") start().catch(handleFatal);
   else if (action === "stop") stop().catch(handleFatal);
@@ -598,27 +638,15 @@ function _sleep(ms) {
 // -------- send + render --------
 
 async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
-  const mode = els.modeSelect.value;
   const model = els.modelSelect.value || "whisper-1";
-
-  let endpoint, headers;
-  if (mode === "proxy") {
-    const base = (els.serverUrl.value || "").trim().replace(/\/$/, "");
-    if (!base) {
-      showBanner("Укажите URL вашего Lovable-приложения в поле выше, затем начните снова.");
-      return;
-    }
-    endpoint = `${base}/api/public/transcribe`;
-    headers = {};
-  } else {
-    const apiKey = (els.apiKey.value || "").trim();
-    if (!apiKey) {
-      showBanner("Введите OpenAI API Key в поле выше, затем начните запись снова.");
-      return;
-    }
-    endpoint = "https://api.openai.com/v1/audio/transcriptions";
-    headers = { Authorization: "Bearer " + apiKey };
+  const apiKey = (els.apiKey.value || "").trim();
+  if (!apiKey) {
+    showBanner("Введите OpenAI API Key в поле выше, затем начните запись снова.");
+    return;
   }
+
+  const endpoint = "https://api.openai.com/v1/audio/transcriptions";
+  const headers = { Authorization: "Bearer " + apiKey };
 
   const form = new FormData();
   form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
@@ -644,6 +672,8 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
       // Network error — retry after a short pause (e.g. Wi-Fi blip).
       attempt++;
       const delay = Math.min(Math.pow(2, attempt) * 500, 8000);
+      const errDetail = e instanceof Error ? e.message : String(e);
+      console.error(`[sendChunk] network error attempt=${attempt}: ${errDetail}`);
       showBanner(`Сеть недоступна, повтор через ${delay / 1000}с… (попытка ${attempt})`);
       await _sleep(delay);
       continue;
@@ -653,12 +683,14 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
       // Rate-limited — back off and retry without ever dropping the chunk.
       attempt++;
       const delay = Math.min(Math.pow(2, attempt) * 500, 16000);
+      console.warn(`[sendChunk] 429 rate-limited attempt=${attempt}`);
       showBanner(`Лимит OpenAI, повтор через ${delay / 1000}с… (попытка ${attempt})`);
       await _sleep(delay);
       continue;
     }
 
     if (res.status === 401) {
+      console.error(`[sendChunk] 401 unauthorized`);
       showBanner("Неверный OpenAI API Key. Проверьте ключ и перезапустите запись.");
       return;
     }
@@ -668,6 +700,7 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
       const errMsg =
         (rawErr && typeof rawErr === "object" ? rawErr.message : rawErr) ||
         `HTTP ${res.status}`;
+      console.error(`[sendChunk] error status=${res.status} msg="${errMsg}" data=${JSON.stringify(data)}`);
       // Transient server error — retry a few times before giving up.
       if (res.status >= 500 && attempt < 5) {
         attempt++;
@@ -682,6 +715,7 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
 
     // Success — clear any lingering error banner.
     hideBanner();
+    console.log(`[sendChunk] ok role=${role} chunkIndex=${chunkIndex}`);
     const text = (data.text || "").trim();
     if (text && !isLikelyHallucination(text) && hasEnoughCyrillic(text)) {
       addOrMergeMessage(role, tsMs, text, chunkIndex);
