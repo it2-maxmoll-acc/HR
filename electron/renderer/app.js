@@ -750,8 +750,11 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
   );
 
   // Retry indefinitely on 429 (rate limit) so nothing is ever dropped.
+  // Each loop iteration checks state.recording so the loop exits cleanly when
+  // the user stops recording while a retry is pending.
   let attempt = 0;
   while (true) {
+    if (!state.recording) return;
     let res, data;
     try {
       res = await fetch(endpoint, {

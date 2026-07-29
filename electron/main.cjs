@@ -595,12 +595,15 @@ ipcMain.handle("store-api-key", (_evt, key) => {
   const fp = getApiKeyPath();
   if (!key) {
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    return;
+    return { encrypted: false };
   }
   if (safeStorage.isEncryptionAvailable()) {
     fs.writeFileSync(fp, safeStorage.encryptString(key));
+    return { encrypted: true };
   } else {
+    console.warn("[apikey] safeStorage encryption unavailable — API key will be stored in plaintext.");
     fs.writeFileSync(fp, key, "utf8");
+    return { encrypted: false };
   }
 });
 
