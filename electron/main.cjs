@@ -192,13 +192,19 @@ async function configureProxy(sess) {
     return;
   }
 
-  // For SOCKS5 (and other protocols), embed credentials directly in the URL.
-  // The app.on('login') event handles HTTP proxy auth (407), but SOCKS5 auth
-  // happens at the protocol level and requires credentials in the proxy URL.
+  // Chromium does NOT support credentials embedded in the proxyRules URL for
+  // HTTP/HTTPS proxies (e.g. "******host:port") — it silently
+  // treats the entry as invalid/unsupported, which empties the resolved
+  // proxy list and makes every request fail with net::ERR_NO_SUPPORTED_PROXIES,
+  // regardless of VPN state. For HTTP(S) proxies, auth must instead be
+  // supplied via the app.on('login') 407 challenge handler below.
+  // SOCKS5 is the exception: its auth happens at the protocol level and
+  // Chromium does support (and requires) credentials embedded in the URL.
+  const isSocks = protocol.startsWith("socks");
   const username = String(cfg.username || "").trim();
   const password = String(cfg.password || "");
-  const auth = username ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : "";
-  const redactedAuth = username ? `${encodeURIComponent(username)}:***@` : "";
+  const auth = isSocks && username ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : "";
+  const redactedAuth = isSocks && username ? `${encodeURIComponent(username)}:***@` : "";
   const proxyRules = `${protocol}://${auth}${host}:${port}`;
   const proxyRulesForDiagnostics = `${protocol}://${redactedAuth}${host}:${port}`;
   const proxyBypassRules =
