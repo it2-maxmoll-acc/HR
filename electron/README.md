@@ -34,6 +34,22 @@ cp electron/proxy.config.example.json electron/proxy.config.local.json
 Поддерживаются `http`, `https`, `socks5`, а также авторизация через
 `username/password`.
 
+### Диагностика, если без VPN всё равно 403
+
+1. Откройте **Системные логи** в приложении.
+2. Найдите строки `[proxy] ...`:
+   - `selected=...` — какой файл конфига реально выбран;
+   - `enabled=true/false` — включён ли прокси в выбранном файле;
+   - `applySucceeded=true/false` — применился ли прокси;
+   - `resolved=...` — маршрут до OpenAI (`DIRECT` означает, что запрос идёт без прокси).
+3. Проверьте порядок приоритета конфига:
+   1. `RT_PROXY_CONFIG`,
+   2. `%APPDATA%/Realtime Transcriber/proxy.config.json`,
+   3. `electron/proxy.config.local.json`,
+   4. `electron/proxy.config.example.json`.
+4. Если в более приоритетном файле прокси выключен, приложение покажет предупреждение
+   в `[proxy]` логах и переключится на следующий валидный `enabled=true` конфиг.
+
 В открывшемся окне:
 
 1. Выберите микрофон (это будет **HR**).

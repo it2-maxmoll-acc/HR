@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("api", {
   autosaveTranscript: (payload) => ipcRenderer.invoke("autosave-transcript", payload),
   autosaveToSession: (payload) => ipcRenderer.invoke("autosave-to-session", payload),
   getAppInfo: () => ipcRenderer.invoke("get-app-info"),
+  getProxyDiagnostics: () => ipcRenderer.invoke("get-proxy-diagnostics"),
 
   // Session history
   listSessions: () => ipcRenderer.invoke("list-sessions"),

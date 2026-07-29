@@ -212,6 +212,33 @@ function copyLogs() {
   navigator.clipboard.writeText(text).catch(() => {});
 }
 
+function logProxyDiagnostics(diag) {
+  if (!diag) {
+    console.warn("[proxy] diagnostics are unavailable");
+    return;
+  }
+  const selected = diag.selectedPath || "<none>";
+  const enabled = Boolean(diag.selectedConfig?.enabled);
+  console.log(
+    `[proxy] selected=${selected} enabled=${enabled} applyAttempted=${Boolean(diag.applyAttempted)} applySucceeded=${Boolean(diag.applySucceeded)} authConfigured=${Boolean(diag.authConfigured)} resolved=${diag.resolvedProxy || "<n/a>"}`,
+  );
+  if (Array.isArray(diag.candidates)) {
+    console.log("[proxy] candidates=", diag.candidates);
+  }
+  if (Array.isArray(diag.warnings)) {
+    for (const warn of diag.warnings) {
+      console.warn(`[proxy] ${warn}`);
+    }
+  }
+  if (diag.error) {
+    console.error(`[proxy] error: ${diag.error}`);
+  }
+}
+
+window.api.getProxyDiagnostics?.().then(logProxyDiagnostics).catch((e) => {
+  console.error("[proxy] failed to load diagnostics", e?.message || e);
+});
+
 
 window.api.onRecordingControl?.((action) => {
   if (action === "start") start().catch(handleFatal);

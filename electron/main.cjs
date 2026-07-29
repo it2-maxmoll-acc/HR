@@ -6,10 +6,23 @@ const fs = require("fs");
 const os = require("os");
 
 const isDev = !app.isPackaged;
+const PROXY_PROBE_URL = "https://api.openai.com/v1/models";
 
 let overlayWin = null;
 let mainWin = null;
 let proxyAuth = null;
+let proxyDiagnostics = {
+  checkedAt: null,
+  candidates: [],
+  selectedPath: null,
+  selectedConfig: null,
+  applyAttempted: false,
+  applySucceeded: false,
+  resolvedProxy: null,
+  authConfigured: false,
+  warnings: [],
+  error: null,
+};
 
 function readJsonIfExists(fp) {
   try {
@@ -30,21 +43,82 @@ function loadProxyConfig() {
     path.join(__dirname, "proxy.config.example.json"),
   ].filter(Boolean);
 
-  for (const fp of candidatePaths) {
+  const candidates = candidatePaths.map((fp) => {
+    if (!fs.existsSync(fp)) return { path: fp, exists: false, validJson: false, enabled: null };
     const parsed = readJsonIfExists(fp);
-    if (parsed) return parsed;
+    if (!parsed) return { path: fp, exists: true, validJson: false, enabled: null };
+    return {
+      path: fp,
+      exists: true,
+      validJson: true,
+      enabled: Boolean(parsed.enabled),
+      parsed,
+    };
+  });
+
+  const warnings = [];
+  const parsedCandidates = candidates.filter((x) => x.validJson);
+  let selected = parsedCandidates[0] || null;
+  const firstEnabled = parsedCandidates.find((x) => x.enabled);
+  if (selected && !selected.enabled && firstEnabled && selected.path !== firstEnabled.path) {
+    warnings.push(
+      `Higher-priority config is disabled (${selected.path}), switching to enabled config (${firstEnabled.path}).`,
+    );
+    selected = firstEnabled;
   }
-  return null;
+
+  return {
+    config: selected?.parsed || null,
+    selectedPath: selected?.path || null,
+    candidates: candidates.map((x) => ({
+      path: x.path,
+      exists: x.exists,
+      validJson: x.validJson,
+      enabled: x.enabled,
+    })),
+    warnings,
+  };
 }
 
 async function configureProxy(sess) {
-  const cfg = loadProxyConfig();
-  if (!cfg?.enabled) return;
+  const loaded = loadProxyConfig();
+  const cfg = loaded.config;
+  proxyDiagnostics = {
+    checkedAt: new Date().toISOString(),
+    candidates: loaded.candidates,
+    selectedPath: loaded.selectedPath,
+    selectedConfig: sanitizeProxyConfig(cfg),
+    applyAttempted: false,
+    applySucceeded: false,
+    resolvedProxy: null,
+    authConfigured: false,
+    warnings: [...loaded.warnings],
+    error: null,
+  };
+
+  if (!cfg) {
+    proxyDiagnostics.warnings.push("No valid proxy config JSON found.");
+    console.warn("[proxy] No valid proxy config JSON found in candidate paths.");
+    return;
+  }
+
+  console.log(
+    `[proxy] Config selected: ${loaded.selectedPath || "<none>"} enabled=${Boolean(cfg.enabled)}`,
+  );
+  if (!cfg.enabled) {
+    proxyDiagnostics.warnings.push(
+      `Selected proxy config is disabled (${loaded.selectedPath || "<unknown>"}).`,
+    );
+    return;
+  }
 
   const protocol = String(cfg.protocol || "http").toLowerCase();
   const host = String(cfg.host || "").trim();
   const port = Number(cfg.port);
-  if (!host || !Number.isFinite(port) || port <= 0) return;
+  if (!host || !Number.isFinite(port) || port <= 0) {
+    proxyDiagnostics.error = "Invalid proxy host/port in selected config.";
+    return;
+  }
 
   const proxyRules = `${protocol}://${host}:${port}`;
   const proxyBypassRules =
@@ -52,10 +126,27 @@ async function configureProxy(sess) {
       ? cfg.bypass.map((x) => String(x).trim()).filter(Boolean).join(";")
       : "<local>";
 
+  proxyDiagnostics.applyAttempted = true;
   await sess.setProxy({
     proxyRules,
     proxyBypassRules,
   });
+  proxyDiagnostics.applySucceeded = true;
+  proxyDiagnostics.proxyRules = proxyRules;
+  proxyDiagnostics.proxyBypassRules = proxyBypassRules;
+  try {
+    proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
+    const resolvedUpper = String(proxyDiagnostics.resolvedProxy || "").toUpperCase();
+    if (resolvedUpper.includes("DIRECT")) {
+      proxyDiagnostics.warnings.push(
+        `Resolved route for ${PROXY_PROBE_URL} is DIRECT (${proxyDiagnostics.resolvedProxy}).`,
+      );
+    }
+  } catch (e) {
+    proxyDiagnostics.warnings.push(
+      `Could not resolve proxy route: ${e?.message || String(e)}`,
+    );
+  }
 
   const username = String(cfg.username || "").trim();
   const password = String(cfg.password || "");
@@ -65,6 +156,20 @@ async function configureProxy(sess) {
         password,
       }
     : null;
+  proxyDiagnostics.authConfigured = Boolean(proxyAuth);
+}
+
+function sanitizeProxyConfig(cfg) {
+  if (!cfg || typeof cfg !== "object") return null;
+  return {
+    enabled: Boolean(cfg.enabled),
+    protocol: String(cfg.protocol || ""),
+    host: String(cfg.host || ""),
+    port: Number(cfg.port),
+    username: String(cfg.username || ""),
+    hasPassword: Boolean(String(cfg.password || "")),
+    bypassCount: Array.isArray(cfg.bypass) ? cfg.bypass.length : 0,
+  };
 }
 
 function createWindow() {
@@ -99,6 +204,7 @@ app.whenReady().then(async () => {
   try {
     await configureProxy(session.defaultSession);
   } catch (e) {
+    proxyDiagnostics.error = e?.message || String(e);
     console.error("Failed to configure proxy:", e?.message || e);
   }
 
@@ -227,6 +333,11 @@ ipcMain.handle("get-app-info", () => ({
   version: app.getVersion(),
   platform: process.platform,
   homedir: os.homedir(),
+}));
+
+ipcMain.handle("get-proxy-diagnostics", () => ({
+  ...proxyDiagnostics,
+  candidatePaths: proxyDiagnostics.candidates?.map((x) => x.path) || [],
 }));
 
 // -------- secure API key storage --------
