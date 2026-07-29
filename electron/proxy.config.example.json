@@ -1,9 +1,9 @@
 {
   "enabled": false,
   "protocol": "socks5",
-  "host": "s21.rus-cdn.ru",
-  "port": 27018,
-  "username": "ai",
-  "password": "19IzDW0lF2QO",
+  "host": "your-proxy-host",
+  "port": 1080,
+  "username": "your-username",
+  "password": "your-password",
   "bypass": ["localhost", "127.0.0.1", "::1"]
 }
