@@ -1,10 +1,10 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, dialog, session, safeStorage, clipboard } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, session, safeStorage, clipboard, net: electronNet } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
-const net = require("net");
+const nodeNet = require("net");
 
 const isDev = !app.isPackaged;
 const PROXY_PROBE_URL = "https://api.openai.com/v1/models";
@@ -25,6 +25,8 @@ let proxyDiagnostics = {
   error: null,
   userDataConfigPath: null,
   rawSocketTest: null,
+  openAiProbe: null,
+  directFallbackApplied: false,
 };
 
 const PROXY_SOCKET_TIMEOUT_MS = 5000;
@@ -37,7 +39,7 @@ const PROXY_SOCKET_TIMEOUT_MS = 5000;
 function testRawSocketConnection(host, port) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
-    const socket = net.connect({ host, port, timeout: PROXY_SOCKET_TIMEOUT_MS });
+    const socket = nodeNet.connect({ host, port, timeout: PROXY_SOCKET_TIMEOUT_MS });
     let settled = false;
     const finish = (success, error) => {
       if (settled) return;
@@ -52,6 +54,44 @@ function testRawSocketConnection(host, port) {
     socket.once("connect", () => finish(true, null));
     socket.once("timeout", () => finish(false, `timeout after ${PROXY_SOCKET_TIMEOUT_MS}ms`));
     socket.once("error", (e) => finish(false, e?.code || e?.message || String(e)));
+  });
+}
+
+function probeOpenAiThroughSession(sess) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const request = electronNet.request({
+      session: sess,
+      method: "HEAD",
+      url: PROXY_PROBE_URL,
+    });
+    let settled = false;
+    const finish = (success, detail) => {
+      if (settled) return;
+      settled = true;
+      resolve({
+        success,
+        detail: detail || null,
+        durationMs: Date.now() - startedAt,
+      });
+    };
+
+    const timeout = setTimeout(() => {
+      try {
+        request.abort();
+      } catch {}
+      finish(false, `timeout after ${PROXY_SOCKET_TIMEOUT_MS}ms`);
+    }, PROXY_SOCKET_TIMEOUT_MS);
+
+    request.on("response", (res) => {
+      clearTimeout(timeout);
+      finish(true, `HTTP ${res.statusCode}`);
+    });
+    request.on("error", (err) => {
+      clearTimeout(timeout);
+      finish(false, err?.message || String(err));
+    });
+    request.end();
   });
 }
 
@@ -166,6 +206,9 @@ async function configureProxy(sess) {
     warnings: [...loaded.warnings],
     error: null,
     userDataConfigPath: loaded.userDataConfigPath,
+    rawSocketTest: null,
+    openAiProbe: null,
+    directFallbackApplied: false,
   };
 
   if (!cfg) {
@@ -212,6 +255,10 @@ async function configureProxy(sess) {
       ? cfg.bypass.map((x) => String(x).trim()).filter(Boolean).join(";")
       : "<local>";
 
+  // Keep proxyAuth for the login event fallback (HTTP proxies).
+  proxyAuth = username ? { username, password } : null;
+  proxyDiagnostics.authConfigured = Boolean(proxyAuth);
+
   proxyDiagnostics.applyAttempted = true;
   await sess.setProxy({
     proxyRules,
@@ -251,9 +298,33 @@ async function configureProxy(sess) {
     );
   }
 
-  // Keep proxyAuth for the login event fallback (HTTP proxies).
-  proxyAuth = username ? { username, password } : null;
-  proxyDiagnostics.authConfigured = Boolean(proxyAuth);
+  proxyDiagnostics.openAiProbe = await probeOpenAiThroughSession(sess);
+  if (!proxyDiagnostics.openAiProbe.success) {
+    const detail = String(proxyDiagnostics.openAiProbe.detail || "");
+    const normalized = detail.toUpperCase();
+    proxyDiagnostics.warnings.push(
+      `OpenAI route probe failed via current proxy route: ${detail || "<unknown>"}.`,
+    );
+    console.error(`[proxy] OpenAI route probe failed: ${detail || "<unknown>"}`);
+
+    // If proxy route is invalid/unusable inside Chromium, switch to DIRECT so
+    // users can still work over VPN/direct internet without editing config.
+    if (
+      normalized.includes("ERR_NO_SUPPORTED_PROXIES")
+      || normalized.includes("ERR_PROXY")
+      || normalized.includes("ERR_TUNNEL_CONNECTION_FAILED")
+    ) {
+      await sess.setProxy({ mode: "direct" });
+      proxyDiagnostics.directFallbackApplied = true;
+      proxyDiagnostics.warnings.push(
+        "Proxy route failed in Chromium; applied DIRECT fallback automatically.",
+      );
+      try {
+        proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
+      } catch {}
+      console.warn("[proxy] Applied DIRECT fallback after proxy probe failure.");
+    }
+  }
 }
 
 

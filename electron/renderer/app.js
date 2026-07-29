@@ -254,6 +254,15 @@ function logProxyDiagnostics(diag) {
       `[proxy] rawSocketTest success=${Boolean(t.success)} durationMs=${t.durationMs} error=${t.error || "<none>"}`,
     );
   }
+  if (diag.openAiProbe) {
+    const t = diag.openAiProbe;
+    console.log(
+      `[proxy] openAiProbe success=${Boolean(t.success)} durationMs=${t.durationMs} detail=${t.detail || "<none>"}`,
+    );
+  }
+  if (diag.directFallbackApplied) {
+    console.warn("[proxy] DIRECT fallback is active because proxy route probe failed.");
+  }
   if (Array.isArray(diag.candidates)) {
     console.log("[proxy] candidates=", diag.candidates);
   }
