@@ -295,8 +295,13 @@ window.api.getProxyDiagnostics?.().then(logProxyDiagnostics).catch((e) => {
 // webRequest.onErrorOccurred) — surfaces the actual cause behind a generic
 // fetch() "Failed to fetch" (e.g. net::ERR_TUNNEL_CONNECTION_FAILED,
 // net::ERR_SSL_PROTOCOL_ERROR, net::ERR_CONNECTION_RESET/CLOSED).
+// Also forwards proxy login-event diagnostics from the main process.
 window.api.onNetError?.((msg) => {
-  console.error(msg);
+  if (msg.startsWith("[proxy] login event:")) {
+    console.log(msg);
+  } else {
+    console.error(msg);
+  }
 });
 
 

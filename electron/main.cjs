@@ -453,7 +453,17 @@ app.whenReady().then(async () => {
 });
 
 app.on("login", (event, _webContents, _request, authInfo, callback) => {
-  if (!authInfo?.isProxy || !proxyAuth?.username) return;
+  const scheme = authInfo?.scheme || "<none>";
+  const host = authInfo?.host || "<none>";
+  const port = authInfo?.port || "<none>";
+  const isProxy = Boolean(authInfo?.isProxy);
+  const hasCredentials = Boolean(proxyAuth?.username);
+  const loginMsg = `[proxy] login event: isProxy=${isProxy} scheme=${scheme} host=${host}:${port} hasCredentials=${hasCredentials}`;
+  console.log(loginMsg);
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.webContents.send("net-error", loginMsg);
+  }
+  if (!isProxy || !hasCredentials) return;
   event.preventDefault();
   callback(proxyAuth.username, proxyAuth.password || "");
 });
