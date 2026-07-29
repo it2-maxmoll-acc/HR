@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("net-error", (_e, msg) => cb(msg));
   },
   getProxyDiagnostics: () => ipcRenderer.invoke("get-proxy-diagnostics"),
+  toggleProxy: (enable) => ipcRenderer.invoke("toggle-proxy", enable),
 
   // Session history
   listSessions: () => ipcRenderer.invoke("list-sessions"),

@@ -159,6 +159,84 @@ body {
   font-size: 12px;
 }
 
+/* -------- proxy toggle row -------- */
+
+.proxy-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.proxy-row-label {
+  font-size: 12px;
+  color: #9aa4af;
+  min-width: 56px;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-track {
+  display: block;
+  width: 40px;
+  height: 22px;
+  background: #262c34;
+  border-radius: 11px;
+  border: 1px solid #3a414a;
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-track {
+  background: #1a4a2a;
+  border-color: #3a8b4a;
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #5a6370;
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(18px);
+  background: #4ec45e;
+}
+
+.proxy-status-text {
+  font-size: 12px;
+  color: #5a6370;
+}
+
+.proxy-status-text.active {
+  color: #4ec45e;
+}
+
+.proxy-status-text.inactive {
+  color: #5a6370;
+}
+
+.proxy-status-text.error {
+  color: #ff6b6b;
+}
+
 /* -------- history panel -------- */
 
 .history-panel {

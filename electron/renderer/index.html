@@ -59,6 +59,14 @@
           <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe (баланс)</option>
         </select>
       </label>
+      <div class="full-row proxy-row" id="proxy-row">
+        <span class="proxy-row-label">🛡 Прокси</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="proxy-enabled" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+        <span id="proxy-status-text" class="proxy-status-text">загрузка…</span>
+      </div>
       <div class="buttons">
         <button id="start" class="btn primary">▶ Начать запись</button>
         <button id="stop" class="btn danger" disabled>■ Остановить</button>

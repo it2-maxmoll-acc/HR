@@ -12,6 +12,10 @@ const PROXY_PROBE_URL = "https://api.openai.com/v1/models";
 let overlayWin = null;
 let mainWin = null;
 let proxyAuth = null;
+// Raw proxy config kept in memory so the runtime toggle can re-apply it.
+let _lastRawProxyConfig = null;
+// Tracks whether proxy is currently active (false = DIRECT mode in use).
+let _proxyRuntimeEnabled = false;
 let proxyDiagnostics = {
   checkedAt: null,
   candidates: [],
@@ -28,6 +32,7 @@ let proxyDiagnostics = {
   openAiProbe: null,
   directProbe: null,
   directFallbackApplied: false,
+  runtimeEnabled: false,
 };
 
 const PROXY_SOCKET_TIMEOUT_MS = 5000;
@@ -240,6 +245,10 @@ async function configureProxy(sess) {
     return;
   }
 
+  // Keep the full config (including credentials) so the runtime toggle can
+  // re-apply it without re-reading from disk.
+  _lastRawProxyConfig = cfg;
+
   // Chromium/Electron does NOT support credentials embedded in the proxyRules URL
   // for ANY proxy protocol — including SOCKS5. Embedding "user:pass@" in the URL
   // causes Chromium to mark the entry as invalid and every request fails with
@@ -347,8 +356,25 @@ async function configureProxy(sess) {
       }
     }
   }
+
+  // Update runtime state: proxy is active unless a DIRECT fallback was applied.
+  _proxyRuntimeEnabled = !proxyDiagnostics.directFallbackApplied;
+  proxyDiagnostics.runtimeEnabled = _proxyRuntimeEnabled;
 }
 
+
+function _persistProxyEnabled(enabled) {
+  try {
+    const userDataConfigPath = path.join(app.getPath("userData"), "proxy.config.json");
+    if (!fs.existsSync(userDataConfigPath)) return;
+    const raw = readJsonIfExists(userDataConfigPath);
+    if (!raw || typeof raw !== "object") return;
+    raw.enabled = enabled;
+    fs.writeFileSync(userDataConfigPath, JSON.stringify(raw, null, 2), "utf8");
+  } catch (e) {
+    console.warn(`[proxy] Could not persist enabled flag: ${e?.message || String(e)}`);
+  }
+}
 
 function sanitizeProxyConfig(cfg) {
   if (!cfg || typeof cfg !== "object") return null;
@@ -572,6 +598,65 @@ ipcMain.handle("get-proxy-diagnostics", () => ({
   ...proxyDiagnostics,
   candidatePaths: proxyDiagnostics.candidates?.map((x) => x.path) || [],
 }));
+
+ipcMain.handle("toggle-proxy", async (_evt, enable) => {
+  const sess = session.defaultSession;
+
+  if (!enable) {
+    // Turn OFF: switch to DIRECT mode.
+    await sess.setProxy({ mode: "direct" });
+    proxyAuth = null;
+    _proxyRuntimeEnabled = false;
+    proxyDiagnostics.runtimeEnabled = false;
+    proxyDiagnostics.authConfigured = false;
+    try {
+      proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
+    } catch {}
+    _persistProxyEnabled(false);
+    console.log("[proxy] Toggled OFF by user (direct mode).");
+    return { ok: true, runtimeEnabled: false };
+  }
+
+  // Turn ON: re-apply proxy from the last loaded config.
+  if (!_lastRawProxyConfig) {
+    return { ok: false, runtimeEnabled: false, error: "No proxy config available. Check proxy.config.json." };
+  }
+
+  const cfg = _lastRawProxyConfig;
+  const protocol = String(cfg.protocol || "http").toLowerCase();
+  const host = String(cfg.host || "").trim();
+  const port = Number(cfg.port);
+  if (!host || !Number.isFinite(port) || port <= 0) {
+    return { ok: false, runtimeEnabled: false, error: "Invalid proxy host/port in config." };
+  }
+
+  const username = String(cfg.username || "").trim();
+  const password = String(cfg.password || "");
+  const proxyRules = `${protocol}://${host}:${port}`;
+  const proxyBypassRules =
+    Array.isArray(cfg.bypass) && cfg.bypass.length > 0
+      ? cfg.bypass.map((x) => String(x).trim()).filter(Boolean).join(";")
+      : "<local>";
+
+  proxyAuth = username ? { username, password } : null;
+  proxyDiagnostics.authConfigured = Boolean(proxyAuth);
+  proxyDiagnostics.proxyRules = proxyRules;
+  proxyDiagnostics.proxyBypassRules = proxyBypassRules;
+  proxyDiagnostics.protocol = protocol;
+
+  await sess.setProxy({ proxyRules, proxyBypassRules });
+  _proxyRuntimeEnabled = true;
+  proxyDiagnostics.runtimeEnabled = true;
+  proxyDiagnostics.directFallbackApplied = false;
+
+  try {
+    proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
+  } catch {}
+
+  _persistProxyEnabled(true);
+  console.log(`[proxy] Toggled ON by user: ${proxyRules}`);
+  return { ok: true, runtimeEnabled: true };
+});
 
 // -------- secure API key storage --------
 

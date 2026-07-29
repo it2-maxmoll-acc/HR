@@ -41,6 +41,9 @@ const els = {
   logsClose: document.getElementById("logs-close"),
   logsCopy: document.getElementById("logs-copy"),
   logsClear: document.getElementById("logs-clear"),
+  proxyRow: document.getElementById("proxy-row"),
+  proxyEnabled: document.getElementById("proxy-enabled"),
+  proxyStatusText: document.getElementById("proxy-status-text"),
 };
 
 const state = {
@@ -287,9 +290,67 @@ function logProxyDiagnostics(diag) {
   }
 }
 
-window.api.getProxyDiagnostics?.().then(logProxyDiagnostics).catch((e) => {
+window.api.getProxyDiagnostics?.().then((diag) => {
+  logProxyDiagnostics(diag);
+  initProxyToggle(diag);
+}).catch((e) => {
   console.error("[proxy] failed to load diagnostics", e?.message || e);
 });
+
+function initProxyToggle(diag) {
+  if (!els.proxyEnabled || !els.proxyStatusText) return;
+
+  // Show the row only when a proxy config with a real host is present.
+  const hasConfig = diag?.selectedConfig?.host &&
+    !diag.selectedConfig.host.includes("example.com") &&
+    diag.selectedConfig.host !== "";
+
+  if (!hasConfig) {
+    if (els.proxyRow) els.proxyRow.style.display = "none";
+    return;
+  }
+
+  // Initial state: use runtimeEnabled from diagnostics.
+  const currentlyEnabled = Boolean(diag?.runtimeEnabled);
+  els.proxyEnabled.checked = currentlyEnabled;
+  setProxyStatusText(currentlyEnabled);
+
+  els.proxyEnabled.addEventListener("change", async () => {
+    const enable = els.proxyEnabled.checked;
+    els.proxyEnabled.disabled = true;
+    els.proxyStatusText.textContent = enable ? "включение…" : "отключение…";
+    els.proxyStatusText.className = "proxy-status-text";
+
+    try {
+      const result = await window.api.toggleProxy(enable);
+      if (!result.ok) {
+        els.proxyEnabled.checked = !enable;
+        setProxyStatusText(!enable);
+        console.error("[proxy] toggle failed:", result.error);
+        return;
+      }
+      setProxyStatusText(result.runtimeEnabled);
+      console.log(`[proxy] toggled ${result.runtimeEnabled ? "ON" : "OFF"} by user`);
+    } catch (e) {
+      els.proxyEnabled.checked = !enable;
+      setProxyStatusText(!enable);
+      console.error("[proxy] toggle error:", e?.message || e);
+    } finally {
+      els.proxyEnabled.disabled = false;
+    }
+  });
+}
+
+function setProxyStatusText(enabled) {
+  if (!els.proxyStatusText) return;
+  if (enabled) {
+    els.proxyStatusText.textContent = "включён";
+    els.proxyStatusText.className = "proxy-status-text active";
+  } else {
+    els.proxyStatusText.textContent = "выключен";
+    els.proxyStatusText.className = "proxy-status-text inactive";
+  }
+}
 
 // Real Chromium net:: error codes for OpenAI requests (see main.cjs
 // webRequest.onErrorOccurred) — surfaces the actual cause behind a generic
