@@ -4,6 +4,6 @@
   "host": "s21.rus-cdn.ru",
   "port": 27018,
   "username": "ai",
-  "password": "PUT_PROXY_PASSWORD_HERE",
+  "password": "19IzDW0lF2QO",
   "bypass": ["localhost", "127.0.0.1", "::1"]
 }

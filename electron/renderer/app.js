@@ -67,7 +67,10 @@ els.apiKey.addEventListener("change", () =>
 // Load / persist connection mode and server URL.
 const DEFAULT_SERVER_URL = "https://ea3a71b5-4e0b-4c46-958e-e3204c5abc7d.lovable.app";
 const savedMode = localStorage.getItem("connection-mode") || "proxy";
-const savedServerUrl = localStorage.getItem("server-url") || DEFAULT_SERVER_URL;
+// If user previously saved a wrong/mistyped URL, reset to default.
+const _rawSavedUrl = localStorage.getItem("server-url") || DEFAULT_SERVER_URL;
+const savedServerUrl = _rawSavedUrl.includes(".lovable.app") ? _rawSavedUrl : DEFAULT_SERVER_URL;
+if (savedServerUrl !== _rawSavedUrl) localStorage.setItem("server-url", savedServerUrl);
 els.modeSelect.value = savedMode;
 els.serverUrl.value = savedServerUrl;
 

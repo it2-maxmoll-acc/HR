@@ -27,6 +27,7 @@ function loadProxyConfig() {
     explicitConfigPath,
     path.join(app.getPath("userData"), "proxy.config.json"),
     path.join(__dirname, "proxy.config.local.json"),
+    path.join(__dirname, "proxy.config.example.json"),
   ].filter(Boolean);
 
   for (const fp of candidatePaths) {
