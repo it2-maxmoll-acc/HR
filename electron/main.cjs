@@ -304,7 +304,13 @@ app.whenReady().then(async () => {
   // net::ERR_TUNNEL_CONNECTION_FAILED) for OpenAI requests, since fetch() in the
   // renderer only reports a generic "Failed to fetch" with no underlying reason.
   session.defaultSession.webRequest.onErrorOccurred((details) => {
-    if (!details?.url?.includes("api.openai.com")) return;
+    let hostname = "";
+    try {
+      hostname = new URL(details?.url || "").hostname;
+    } catch {
+      return;
+    }
+    if (hostname !== "api.openai.com") return;
     console.error(
       `[proxy] Network error for ${details.url}: ${details.error} (resourceType=${details.resourceType})`,
     );

@@ -52,8 +52,9 @@ cp electron/proxy.config.example.json electron/proxy.config.local.json
    - `rawSocketTest success=...` — прямая TCP-проверка до `host:port` прокси **в обход** Chromium
      (через Node `net`, как это делает `curl`/системные утилиты). Если `success=false`,
      а `curl -x ******host:port ...` с той же машины работает — значит именно
-     процесс приложения (`Realtime Transcriber.exe`) блокируется файрволом/антивирусом
-     (частая практика — разрешать сеть по имени процесса), и нужно добавить `.exe` в исключения.
+     процесс приложения (исполняемый файл `Realtime Transcriber`, на Windows — `.exe`)
+     блокируется файрволом/антивирусом (частая практика — разрешать сеть по имени
+     процесса), и его нужно добавить в исключения.
 3. Если ошибки `[proxy] Network error for https://api.openai.com/...: net::ERR_...` —
    это точная причина от Chromium (например `ERR_TUNNEL_CONNECTION_FAILED` — не прошла
    авторизация/тоннель до цели через прокси; `ERR_PROXY_CONNECTION_FAILED` — прокси недоступен).
@@ -62,7 +63,7 @@ cp electron/proxy.config.example.json electron/proxy.config.local.json
    2. `%APPDATA%/Realtime Transcriber/proxy.config.json`,
    3. `electron/proxy.config.local.json`,
    4. `electron/proxy.config.example.json`.
-4. Если в более приоритетном файле прокси выключен, приложение покажет предупреждение
+5. Если в более приоритетном файле прокси выключен, приложение покажет предупреждение
    в `[proxy]` логах и переключится на следующий валидный `enabled=true` конфиг.
 
 В открывшемся окне:
