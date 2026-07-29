@@ -72,12 +72,13 @@ function probeOpenAiThroughSession(sess) {
       url: PROXY_PROBE_URL,
     });
     let settled = false;
-    const finish = (success, detail) => {
+    const finish = (success, detail, statusCode) => {
       if (settled) return;
       settled = true;
       resolve({
         success,
         detail: detail || null,
+        statusCode: statusCode || null,
         durationMs: Date.now() - startedAt,
       });
     };
@@ -86,16 +87,33 @@ function probeOpenAiThroughSession(sess) {
       try {
         request.abort();
       } catch {}
-      finish(false, `timeout after ${PROXY_SOCKET_TIMEOUT_MS}ms`);
+      finish(false, `timeout after ${PROXY_SOCKET_TIMEOUT_MS}ms`, null);
     }, PROXY_SOCKET_TIMEOUT_MS);
+
+    // For HTTP proxies: supply credentials when Chromium raises a 407 challenge
+    // on the probe request itself. (SOCKS5 auth is handled via embedded credentials
+    // in proxyRules, so this handler fires only for HTTP/HTTPS proxy challenges.)
+    request.on("login", (authInfo, callback) => {
+      const info = `scheme=${authInfo?.scheme} host=${authInfo?.host}:${authInfo?.port} isProxy=${authInfo?.isProxy}`;
+      console.log(`[proxy] probe login event: ${info} hasCredentials=${Boolean(proxyAuth?.username)}`);
+      if (authInfo?.isProxy && proxyAuth?.username) {
+        callback(proxyAuth.username, proxyAuth.password || "");
+      } else {
+        callback("", "");
+      }
+    });
 
     request.on("response", (res) => {
       clearTimeout(timeout);
-      finish(true, `HTTP ${res.statusCode}`);
+      const detail = `HTTP ${res.statusCode}`;
+      console.log(`[proxy] probe response: ${detail} durationMs=${Date.now() - startedAt}`);
+      finish(true, detail, res.statusCode);
     });
     request.on("error", (err) => {
       clearTimeout(timeout);
-      finish(false, err?.message || String(err));
+      const detail = err?.message || String(err);
+      console.log(`[proxy] probe error: ${detail} durationMs=${Date.now() - startedAt}`);
+      finish(false, detail, null);
     });
     request.end();
   });
@@ -250,16 +268,25 @@ async function configureProxy(sess) {
     return;
   }
 
-  // Chromium/Electron does NOT support credentials embedded in the proxyRules URL
-  // for ANY proxy protocol — including SOCKS5. Embedding "user:pass@" in the URL
-  // causes Chromium to mark the entry as invalid and every request fails with
-  // net::ERR_NO_SUPPORTED_PROXIES. Auth must always be supplied via the
-  // app.on('login') challenge handler below, which fires for both HTTP 407
-  // challenges and SOCKS5 auth handshakes.
+  // Credential embedding rules per proxy protocol:
+  //
+  // SOCKS5/SOCKS4: Chromium supports credentials embedded directly in the URL as
+  //   ******host:port. The app.on('login') event does NOT fire for
+  //   SOCKS5 protocol-level auth handshakes, so credentials MUST be in the URL.
+  //
+  // HTTP/HTTPS: Chromium does NOT support credentials in the proxy URL — embedding
+  //   them causes net::ERR_NO_SUPPORTED_PROXIES. HTTP proxy auth must use the
+  //   app.on('login') 407 challenge handler below.
   const username = String(cfg.username || "").trim();
   const password = String(cfg.password || "");
-  const proxyRules = `${protocol}://${host}:${port}`;
-  const proxyRulesForDiagnostics = proxyRules;
+  const isSocks = protocol.startsWith("socks");
+  const proxyRulesForDiagnostics = `${protocol}://${host}:${port}`;
+  const proxyRules = (isSocks && username)
+    ? `${protocol}://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`
+    : `${protocol}://${host}:${port}`;
+  if (isSocks && username) {
+    console.log(`[proxy] SOCKS5 credentials embedded in proxyRules (user=${username})`);
+  }
   const proxyBypassRules =
     Array.isArray(cfg.bypass) && cfg.bypass.length > 0
       ? cfg.bypass.map((x) => String(x).trim()).filter(Boolean).join(";")
@@ -324,7 +351,9 @@ async function configureProxy(sess) {
     console.error(`[proxy] OpenAI route probe failed: ${detail || "<unknown>"}`);
 
     // If proxy route is invalid/unusable inside Chromium, try DIRECT as a
-    // fallback, but keep it ONLY when direct route is actually reachable.
+    // fallback, but keep it ONLY when direct route is actually reachable AND
+    // not geo-blocked (HTTP 403 "Country not supported" means the API server is
+    // reachable but the request is rejected — that is not a working fallback).
     if (
       normalized.includes("ERR_NO_SUPPORTED_PROXIES")
       || normalized.includes("ERR_PROXY")
@@ -333,7 +362,9 @@ async function configureProxy(sess) {
     ) {
       await sess.setProxy({ mode: "direct" });
       proxyDiagnostics.directProbe = await probeOpenAiThroughSession(sess);
-      if (proxyDiagnostics.directProbe.success) {
+      const directOk = proxyDiagnostics.directProbe.success
+        && proxyDiagnostics.directProbe.statusCode !== 403;
+      if (directOk) {
         proxyDiagnostics.directFallbackApplied = true;
         proxyDiagnostics.warnings.push(
           "Proxy route failed in Chromium; applied DIRECT fallback automatically.",
@@ -343,14 +374,17 @@ async function configureProxy(sess) {
         } catch {}
         console.warn("[proxy] Applied DIRECT fallback after proxy probe failure.");
       } else {
+        const directReason = proxyDiagnostics.directProbe.statusCode === 403
+          ? "geo-blocked (HTTP 403 Country not supported)"
+          : (proxyDiagnostics.directProbe.detail || "<unknown>");
         await sess.setProxy({
           proxyRules,
           proxyBypassRules,
         });
         proxyDiagnostics.warnings.push(
-          `DIRECT fallback probe also failed (${proxyDiagnostics.directProbe.detail || "<unknown>"}); keeping configured proxy route.`,
+          `DIRECT fallback not usable (${directReason}); keeping configured proxy route.`,
         );
-        console.warn("[proxy] DIRECT fallback probe failed; restored configured proxy route.");
+        console.warn(`[proxy] DIRECT fallback not usable (${directReason}); restored configured proxy route.`);
         try {
           proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
         } catch {}
@@ -633,7 +667,11 @@ ipcMain.handle("toggle-proxy", async (_evt, enable) => {
 
   const username = String(cfg.username || "").trim();
   const password = String(cfg.password || "");
-  const proxyRules = `${protocol}://${host}:${port}`;
+  const isSocks = protocol.startsWith("socks");
+  const proxyRulesForDisplay = `${protocol}://${host}:${port}`;
+  const proxyRules = (isSocks && username)
+    ? `${protocol}://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`
+    : `${protocol}://${host}:${port}`;
   const proxyBypassRules =
     Array.isArray(cfg.bypass) && cfg.bypass.length > 0
       ? cfg.bypass.map((x) => String(x).trim()).filter(Boolean).join(";")
@@ -641,10 +679,13 @@ ipcMain.handle("toggle-proxy", async (_evt, enable) => {
 
   proxyAuth = username ? { username, password } : null;
   proxyDiagnostics.authConfigured = Boolean(proxyAuth);
-  proxyDiagnostics.proxyRules = proxyRules;
+  proxyDiagnostics.proxyRules = proxyRulesForDisplay;
   proxyDiagnostics.proxyBypassRules = proxyBypassRules;
   proxyDiagnostics.protocol = protocol;
 
+  if (isSocks && username) {
+    console.log(`[proxy] SOCKS5 credentials embedded in proxyRules (user=${username})`);
+  }
   await sess.setProxy({ proxyRules, proxyBypassRules });
   _proxyRuntimeEnabled = true;
   proxyDiagnostics.runtimeEnabled = true;
@@ -655,7 +696,7 @@ ipcMain.handle("toggle-proxy", async (_evt, enable) => {
   } catch {}
 
   _persistProxyEnabled(true);
-  console.log(`[proxy] Toggled ON by user: ${proxyRules}`);
+  console.log(`[proxy] Toggled ON by user: ${proxyRulesForDisplay}`);
   return { ok: true, runtimeEnabled: true };
 });
 
