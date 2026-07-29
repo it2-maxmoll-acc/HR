@@ -319,6 +319,7 @@ async function configureProxy(sess) {
       normalized.includes("ERR_NO_SUPPORTED_PROXIES")
       || normalized.includes("ERR_PROXY")
       || normalized.includes("ERR_TUNNEL_CONNECTION_FAILED")
+      || normalized.includes("ERR_SOCKS_CONNECTION_FAILED")
     ) {
       await sess.setProxy({ mode: "direct" });
       proxyDiagnostics.directProbe = await probeOpenAiThroughSession(sess);
