@@ -1007,6 +1007,7 @@ async function refreshHistoryList() {
     els.historyList.appendChild(row);
   }
 
+  els.historyList.removeEventListener("click", onHistoryAction);
   els.historyList.addEventListener("click", onHistoryAction);
 }
 
