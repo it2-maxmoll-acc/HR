@@ -248,6 +248,11 @@ function logProxyDiagnostics(diag) {
   if (diag.userDataConfigPath) {
     console.log(`[proxy] userDataConfigPath=${diag.userDataConfigPath}`);
   }
+  if (diag.proxyRules) {
+    console.log(
+      `[proxy] protocol=${diag.protocol || "<n/a>"} proxyRules=${diag.proxyRules} proxyBypassRules=${diag.proxyBypassRules || "<n/a>"}`,
+    );
+  }
   if (diag.rawSocketTest) {
     const t = diag.rawSocketTest;
     console.log(

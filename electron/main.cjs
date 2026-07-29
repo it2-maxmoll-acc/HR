@@ -207,6 +207,9 @@ async function configureProxy(sess) {
     warnings: [...loaded.warnings],
     error: null,
     userDataConfigPath: loaded.userDataConfigPath,
+    protocol: null,
+    proxyRules: null,
+    proxyBypassRules: null,
     rawSocketTest: null,
     openAiProbe: null,
     directProbe: null,
@@ -267,8 +270,12 @@ async function configureProxy(sess) {
     proxyBypassRules,
   });
   proxyDiagnostics.applySucceeded = true;
+  proxyDiagnostics.protocol = protocol;
   proxyDiagnostics.proxyRules = proxyRulesForDiagnostics;
   proxyDiagnostics.proxyBypassRules = proxyBypassRules;
+  console.log(
+    `[proxy] Applied proxyRules=${proxyRulesForDiagnostics} proxyBypassRules=${proxyBypassRules}`,
+  );
 
   proxyDiagnostics.rawSocketTest = await testRawSocketConnection(host, port);
   if (!proxyDiagnostics.rawSocketTest.success) {
@@ -291,7 +298,9 @@ async function configureProxy(sess) {
     const resolvedUpper = String(proxyDiagnostics.resolvedProxy || "").toUpperCase();
     if (resolvedUpper.includes("DIRECT")) {
       proxyDiagnostics.warnings.push(
-        `Resolved route for ${PROXY_PROBE_URL} is DIRECT (${proxyDiagnostics.resolvedProxy}).`,
+        `Resolved route for ${PROXY_PROBE_URL} is DIRECT (${proxyDiagnostics.resolvedProxy}) even though ` +
+          `proxyRules=${proxyRulesForDiagnostics} proxyBypassRules=${proxyBypassRules} were applied. ` +
+          `Check that the host is not matched by proxyBypassRules and that setProxy() was not overridden later.`,
       );
     }
   } catch (e) {
