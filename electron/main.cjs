@@ -240,27 +240,22 @@ async function configureProxy(sess) {
     return;
   }
 
-  // Chromium does NOT support credentials embedded in the proxyRules URL for
-  // HTTP/HTTPS proxies (e.g. "******host:port") — it silently
-  // treats the entry as invalid/unsupported, which empties the resolved
-  // proxy list and makes every request fail with net::ERR_NO_SUPPORTED_PROXIES,
-  // regardless of VPN state. For HTTP(S) proxies, auth must instead be
-  // supplied via the app.on('login') 407 challenge handler below.
-  // SOCKS5 is the exception: its auth happens at the protocol level and
-  // Chromium does support (and requires) credentials embedded in the URL.
-  const isSocks = protocol.startsWith("socks");
+  // Chromium/Electron does NOT support credentials embedded in the proxyRules URL
+  // for ANY proxy protocol — including SOCKS5. Embedding "user:pass@" in the URL
+  // causes Chromium to mark the entry as invalid and every request fails with
+  // net::ERR_NO_SUPPORTED_PROXIES. Auth must always be supplied via the
+  // app.on('login') challenge handler below, which fires for both HTTP 407
+  // challenges and SOCKS5 auth handshakes.
   const username = String(cfg.username || "").trim();
   const password = String(cfg.password || "");
-  const auth = isSocks && username ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : "";
-  const redactedAuth = isSocks && username ? `${encodeURIComponent(username)}:***@` : "";
-  const proxyRules = `${protocol}://${auth}${host}:${port}`;
-  const proxyRulesForDiagnostics = `${protocol}://${redactedAuth}${host}:${port}`;
+  const proxyRules = `${protocol}://${host}:${port}`;
+  const proxyRulesForDiagnostics = proxyRules;
   const proxyBypassRules =
     Array.isArray(cfg.bypass) && cfg.bypass.length > 0
       ? cfg.bypass.map((x) => String(x).trim()).filter(Boolean).join(";")
       : "<local>";
 
-  // Keep proxyAuth for the login event fallback (HTTP proxies).
+  // Keep proxyAuth for the login event handler (both HTTP 407 and SOCKS5 auth).
   proxyAuth = username ? { username, password } : null;
   proxyDiagnostics.authConfigured = Boolean(proxyAuth);
 

@@ -23,7 +23,7 @@ cp electron/proxy.config.example.json electron/proxy.config.local.json
 ```
 
 2. Впишите только `username` и `password` в `electron/proxy.config.local.json`.
-   Остальные параметры уже предзаполнены под HTTP-прокси `s21.rus-cdn.ru:27017`.
+   Остальные параметры уже предзаполнены под SOCKS5-прокси `s21.rus-cdn.ru:27018`.
 3. Приложение автоматически подхватит прокси при старте.
 
 Приоритет загрузки конфига:
@@ -36,10 +36,12 @@ cp electron/proxy.config.example.json electron/proxy.config.local.json
 > Оно использует только `%APPDATA%\Realtime Transcriber\proxy.config.json`
 > (или `RT_PROXY_CONFIG`). Если файла нет, приложение создаст шаблон в `%APPDATA%`.
 > Откройте этот файл и заполните `username/password`.
-> По умолчанию шаблон уже содержит рабочие HTTP-параметры `s21.rus-cdn.ru:27017` и `"enabled": true`.
+> По умолчанию шаблон уже содержит рабочие SOCKS5-параметры `s21.rus-cdn.ru:27018` и `"enabled": true`.
 
 Поддерживаются `http`, `https`, `socks5`, а также авторизация через
-`username/password`.
+`username/password` (аутентификация передаётся через внутренний обработчик —
+учётные данные **не** встраиваются в URL прокси, т.к. Electron/Chromium их
+отвергает для любого протокола и выдаёт `ERR_NO_SUPPORTED_PROXIES`).
 
 ### Диагностика, если без VPN всё равно 403
 
