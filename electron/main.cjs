@@ -230,12 +230,6 @@ async function configureProxy(sess) {
   console.log(
     `[proxy] Config selected: ${loaded.selectedPath || "<none>"} enabled=${Boolean(cfg.enabled)}`,
   );
-  if (!cfg.enabled) {
-    proxyDiagnostics.warnings.push(
-      `Selected proxy config is disabled (${loaded.selectedPath || "<unknown>"}).`,
-    );
-    return;
-  }
 
   const protocol = String(cfg.protocol || "http").toLowerCase();
   const host = String(cfg.host || "").trim();
@@ -246,8 +240,15 @@ async function configureProxy(sess) {
   }
 
   // Keep the full config (including credentials) so the runtime toggle can
-  // re-apply it without re-reading from disk.
+  // re-apply it without re-reading from disk — even if currently disabled.
   _lastRawProxyConfig = cfg;
+
+  if (!cfg.enabled) {
+    proxyDiagnostics.warnings.push(
+      `Selected proxy config is disabled (${loaded.selectedPath || "<unknown>"}).`,
+    );
+    return;
+  }
 
   // Chromium/Electron does NOT support credentials embedded in the proxyRules URL
   // for ANY proxy protocol — including SOCKS5. Embedding "user:pass@" in the URL

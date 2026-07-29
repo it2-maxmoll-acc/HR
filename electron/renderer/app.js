@@ -300,10 +300,8 @@ window.api.getProxyDiagnostics?.().then((diag) => {
 function initProxyToggle(diag) {
   if (!els.proxyEnabled || !els.proxyStatusText) return;
 
-  // Show the row only when a proxy config with a real host is present.
-  const hasConfig = diag?.selectedConfig?.host &&
-    !diag.selectedConfig.host.includes("example.com") &&
-    diag.selectedConfig.host !== "";
+  // Show the row only when a proxy config with a non-empty host is present.
+  const hasConfig = Boolean(diag?.selectedConfig?.host);
 
   if (!hasConfig) {
     if (els.proxyRow) els.proxyRow.style.display = "none";
