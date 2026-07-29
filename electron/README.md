@@ -31,10 +31,10 @@ cp electron/proxy.config.example.json electron/proxy.config.local.json
 2. `%APPDATA%\Realtime Transcriber\proxy.config.json` — **рекомендуется для установленного приложения**,
 3. `electron/proxy.config.local.json` — только для разработки (не попадает в .exe).
 
-> **Для установленного .exe** создайте файл
-> `%APPDATA%\Realtime Transcriber\proxy.config.json`
-> и скопируйте в него содержимое `proxy.config.example.json`,
-> выставив `"enabled": true` и заполнив данные прокси.
+> **Для установленного .exe** приложение больше **не читает** `proxy.config.example.json` из `app.asar`.
+> Оно использует только `%APPDATA%\Realtime Transcriber\proxy.config.json`
+> (или `RT_PROXY_CONFIG`). Если файла нет, приложение создаст шаблон в `%APPDATA%`.
+> Откройте этот файл, выставьте `"enabled": true` и заполните данные прокси.
 
 Поддерживаются `http`, `https`, `socks5`, а также авторизация через
 `username/password`.

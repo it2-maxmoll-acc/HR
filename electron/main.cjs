@@ -22,6 +22,7 @@ let proxyDiagnostics = {
   authConfigured: false,
   warnings: [],
   error: null,
+  userDataConfigPath: null,
 };
 
 function readJsonIfExists(fp) {
@@ -34,16 +35,45 @@ function readJsonIfExists(fp) {
   }
 }
 
+function ensurePackagedProxyConfig(userDataConfigPath) {
+  if (!app.isPackaged || !userDataConfigPath || fs.existsSync(userDataConfigPath)) {
+    return { created: false, warning: null };
+  }
+
+  const bundledExamplePath = path.join(__dirname, "proxy.config.example.json");
+  if (!fs.existsSync(bundledExamplePath)) {
+    return { created: false, warning: null };
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(userDataConfigPath), { recursive: true });
+    fs.copyFileSync(bundledExamplePath, userDataConfigPath);
+    return {
+      created: true,
+      warning: `Created proxy config template at ${userDataConfigPath}. Fill it in and set enabled=true.`,
+    };
+  } catch (e) {
+    return {
+      created: false,
+      warning: `Could not create proxy config template at ${userDataConfigPath}: ${e?.message || String(e)}`,
+    };
+  }
+}
+
 function loadProxyConfig() {
   const explicitConfigPath = process.env.RT_PROXY_CONFIG;
-  const candidatePaths = [
-    explicitConfigPath,
-    path.join(app.getPath("userData"), "proxy.config.json"),
-    path.join(__dirname, "proxy.config.local.json"),
-    path.join(__dirname, "proxy.config.example.json"),
-  ].filter(Boolean);
+  const userDataConfigPath = path.join(app.getPath("userData"), "proxy.config.json");
+  const bootstrap = ensurePackagedProxyConfig(userDataConfigPath);
+  const candidatePaths = app.isPackaged
+    ? [explicitConfigPath, userDataConfigPath]
+    : [
+        explicitConfigPath,
+        userDataConfigPath,
+        path.join(__dirname, "proxy.config.local.json"),
+        path.join(__dirname, "proxy.config.example.json"),
+      ];
 
-  const candidates = candidatePaths.map((fp) => {
+  const candidates = candidatePaths.filter(Boolean).map((fp) => {
     if (!fs.existsSync(fp)) return { path: fp, exists: false, validJson: false, enabled: null };
     const parsed = readJsonIfExists(fp);
     if (!parsed) return { path: fp, exists: true, validJson: false, enabled: null };
@@ -57,6 +87,7 @@ function loadProxyConfig() {
   });
 
   const warnings = [];
+  if (bootstrap.warning) warnings.push(bootstrap.warning);
   const parsedCandidates = candidates.filter((x) => x.validJson);
   let selected = parsedCandidates[0] || null;
   const firstEnabled = parsedCandidates.find((x) => x.enabled);
@@ -66,10 +97,20 @@ function loadProxyConfig() {
     );
     selected = firstEnabled;
   }
+  if (app.isPackaged && selected && selected.path !== userDataConfigPath && selected.path !== explicitConfigPath) {
+    warnings.push(`Ignoring packaged proxy config path: ${selected.path}`);
+    selected = null;
+  }
+  if (app.isPackaged && !selected) {
+    warnings.push(
+      `Packaged app expects proxy config at ${userDataConfigPath} or RT_PROXY_CONFIG.`,
+    );
+  }
 
   return {
     config: selected?.parsed || null,
     selectedPath: selected?.path || null,
+    userDataConfigPath,
     candidates: candidates.map((x) => ({
       path: x.path,
       exists: x.exists,
@@ -94,6 +135,7 @@ async function configureProxy(sess) {
     authConfigured: false,
     warnings: [...loaded.warnings],
     error: null,
+    userDataConfigPath: loaded.userDataConfigPath,
   };
 
   if (!cfg) {

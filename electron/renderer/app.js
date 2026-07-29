@@ -222,6 +222,9 @@ function logProxyDiagnostics(diag) {
   console.log(
     `[proxy] selected=${selected} enabled=${enabled} applyAttempted=${Boolean(diag.applyAttempted)} applySucceeded=${Boolean(diag.applySucceeded)} authConfigured=${Boolean(diag.authConfigured)} resolved=${diag.resolvedProxy || "<n/a>"}`,
   );
+  if (diag.userDataConfigPath) {
+    console.log(`[proxy] userDataConfigPath=${diag.userDataConfigPath}`);
+  }
   if (Array.isArray(diag.candidates)) {
     console.log("[proxy] candidates=", diag.candidates);
   }
