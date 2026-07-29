@@ -26,6 +26,7 @@ let proxyDiagnostics = {
   userDataConfigPath: null,
   rawSocketTest: null,
   openAiProbe: null,
+  directProbe: null,
   directFallbackApplied: false,
 };
 
@@ -208,6 +209,7 @@ async function configureProxy(sess) {
     userDataConfigPath: loaded.userDataConfigPath,
     rawSocketTest: null,
     openAiProbe: null,
+    directProbe: null,
     directFallbackApplied: false,
   };
 
@@ -307,22 +309,37 @@ async function configureProxy(sess) {
     );
     console.error(`[proxy] OpenAI route probe failed: ${detail || "<unknown>"}`);
 
-    // If proxy route is invalid/unusable inside Chromium, switch to DIRECT so
-    // users can still work over VPN/direct internet without editing config.
+    // If proxy route is invalid/unusable inside Chromium, try DIRECT as a
+    // fallback, but keep it ONLY when direct route is actually reachable.
     if (
       normalized.includes("ERR_NO_SUPPORTED_PROXIES")
       || normalized.includes("ERR_PROXY")
       || normalized.includes("ERR_TUNNEL_CONNECTION_FAILED")
     ) {
       await sess.setProxy({ mode: "direct" });
-      proxyDiagnostics.directFallbackApplied = true;
-      proxyDiagnostics.warnings.push(
-        "Proxy route failed in Chromium; applied DIRECT fallback automatically.",
-      );
-      try {
-        proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
-      } catch {}
-      console.warn("[proxy] Applied DIRECT fallback after proxy probe failure.");
+      proxyDiagnostics.directProbe = await probeOpenAiThroughSession(sess);
+      if (proxyDiagnostics.directProbe.success) {
+        proxyDiagnostics.directFallbackApplied = true;
+        proxyDiagnostics.warnings.push(
+          "Proxy route failed in Chromium; applied DIRECT fallback automatically.",
+        );
+        try {
+          proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
+        } catch {}
+        console.warn("[proxy] Applied DIRECT fallback after proxy probe failure.");
+      } else {
+        await sess.setProxy({
+          proxyRules,
+          proxyBypassRules,
+        });
+        proxyDiagnostics.warnings.push(
+          `DIRECT fallback probe also failed (${proxyDiagnostics.directProbe.detail || "<unknown>"}); keeping configured proxy route.`,
+        );
+        console.warn("[proxy] DIRECT fallback probe failed; restored configured proxy route.");
+        try {
+          proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
+        } catch {}
+      }
     }
   }
 }

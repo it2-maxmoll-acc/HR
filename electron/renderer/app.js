@@ -260,6 +260,12 @@ function logProxyDiagnostics(diag) {
       `[proxy] openAiProbe success=${Boolean(t.success)} durationMs=${t.durationMs} detail=${t.detail || "<none>"}`,
     );
   }
+  if (diag.directProbe) {
+    const t = diag.directProbe;
+    console.log(
+      `[proxy] directProbe success=${Boolean(t.success)} durationMs=${t.durationMs} detail=${t.detail || "<none>"}`,
+    );
+  }
   if (diag.directFallbackApplied) {
     console.warn("[proxy] DIRECT fallback is active because proxy route probe failed.");
   }
