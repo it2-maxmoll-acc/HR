@@ -8,6 +8,11 @@ contextBridge.exposeInMainWorld("api", {
   autosaveTranscript: (payload) => ipcRenderer.invoke("autosave-transcript", payload),
   autosaveToSession: (payload) => ipcRenderer.invoke("autosave-to-session", payload),
   getAppInfo: () => ipcRenderer.invoke("get-app-info"),
+  copyToClipboard: (text) => ipcRenderer.invoke("copy-to-clipboard", text),
+  onNetError: (cb) => {
+    ipcRenderer.removeAllListeners("net-error");
+    ipcRenderer.on("net-error", (_e, msg) => cb(msg));
+  },
   getProxyDiagnostics: () => ipcRenderer.invoke("get-proxy-diagnostics"),
 
   // Session history

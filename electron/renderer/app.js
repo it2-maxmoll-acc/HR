@@ -207,9 +207,32 @@ function clearLogs() {
   els.logsList.innerHTML = "";
 }
 
-function copyLogs() {
+async function copyLogs() {
   const text = _logs.map((e) => `[${e.ts}] [${e.level.toUpperCase()}] ${e.msg}`).join("\n");
-  navigator.clipboard.writeText(text).catch(() => {});
+  const originalLabel = els.logsCopy.textContent;
+  const showResult = (label, revertMs = 1500) => {
+    els.logsCopy.textContent = label;
+    setTimeout(() => {
+      els.logsCopy.textContent = originalLabel;
+    }, revertMs);
+  };
+  try {
+    // Prefer the native Electron clipboard via IPC: unlike navigator.clipboard,
+    // it is not gated by the renderer's permission request handler and works
+    // reliably regardless of window focus or secure-context quirks.
+    if (window.api?.copyToClipboard) {
+      const result = await window.api.copyToClipboard(text);
+      if (result?.success) {
+        showResult("✅ Скопировано");
+        return;
+      }
+    }
+    await navigator.clipboard.writeText(text);
+    showResult("✅ Скопировано");
+  } catch (err) {
+    console.error(`[logs] copy failed: ${err?.message || err}`);
+    showResult("❌ Ошибка копирования");
+  }
 }
 
 function logProxyDiagnostics(diag) {
@@ -246,6 +269,14 @@ function logProxyDiagnostics(diag) {
 
 window.api.getProxyDiagnostics?.().then(logProxyDiagnostics).catch((e) => {
   console.error("[proxy] failed to load diagnostics", e?.message || e);
+});
+
+// Real Chromium net:: error codes for OpenAI requests (see main.cjs
+// webRequest.onErrorOccurred) — surfaces the actual cause behind a generic
+// fetch() "Failed to fetch" (e.g. net::ERR_TUNNEL_CONNECTION_FAILED,
+// net::ERR_SSL_PROTOCOL_ERROR, net::ERR_CONNECTION_RESET/CLOSED).
+window.api.onNetError?.((msg) => {
+  console.error(msg);
 });
 
 

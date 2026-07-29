@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, dialog, session, safeStorage } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, session, safeStorage, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -303,6 +303,9 @@ app.whenReady().then(async () => {
   // Log real Chromium network errors (e.g. net::ERR_PROXY_CONNECTION_FAILED,
   // net::ERR_TUNNEL_CONNECTION_FAILED) for OpenAI requests, since fetch() in the
   // renderer only reports a generic "Failed to fetch" with no underlying reason.
+  // Forward it to the renderer too, so it shows up in the in-app "Системные логи"
+  // panel — previously this only went to the (invisible, in a packaged app) main
+  // process console, leaving the real cause of network failures undiagnosable.
   session.defaultSession.webRequest.onErrorOccurred((details) => {
     let hostname = "";
     try {
@@ -311,14 +314,18 @@ app.whenReady().then(async () => {
       return;
     }
     if (hostname !== "api.openai.com") return;
-    console.error(
-      `[proxy] Network error for ${details.url}: ${details.error} (resourceType=${details.resourceType})`,
-    );
+    const msg = `[proxy] Network error for ${details.url}: ${details.error} (resourceType=${details.resourceType})`;
+    console.error(msg);
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send("net-error", msg);
+    }
   });
 
   // Allow the renderer to request microphone and desktop audio without extra prompts.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
-    if (permission === "media") return cb(true);
+    if (permission === "media" || permission === "clipboard-read" || permission === "clipboard-sanitized-write") {
+      return cb(true);
+    }
     cb(false);
   });
 
@@ -442,6 +449,15 @@ ipcMain.handle("get-app-info", () => ({
   platform: process.platform,
   homedir: os.homedir(),
 }));
+
+ipcMain.handle("copy-to-clipboard", (_evt, text) => {
+  try {
+    clipboard.writeText(String(text ?? ""));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+});
 
 ipcMain.handle("get-proxy-diagnostics", () => ({
   ...proxyDiagnostics,
