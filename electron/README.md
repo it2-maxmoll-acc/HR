@@ -22,7 +22,8 @@ npm run start:electron
 cp electron/proxy.config.example.json electron/proxy.config.local.json
 ```
 
-2. Заполните `password` в `electron/proxy.config.local.json`.
+2. Впишите только `username` и `password` в `electron/proxy.config.local.json`.
+   Остальные параметры уже предзаполнены под HTTP-прокси `s21.rus-cdn.ru:27017`.
 3. Приложение автоматически подхватит прокси при старте.
 
 Приоритет загрузки конфига:
@@ -34,7 +35,8 @@ cp electron/proxy.config.example.json electron/proxy.config.local.json
 > **Для установленного .exe** приложение больше **не читает** `proxy.config.example.json` из `app.asar`.
 > Оно использует только `%APPDATA%\Realtime Transcriber\proxy.config.json`
 > (или `RT_PROXY_CONFIG`). Если файла нет, приложение создаст шаблон в `%APPDATA%`.
-> Откройте этот файл, выставьте `"enabled": true` и заполните данные прокси.
+> Откройте этот файл и заполните `username/password`.
+> По умолчанию шаблон уже содержит рабочие HTTP-параметры `s21.rus-cdn.ru:27017` и `"enabled": true`.
 
 Поддерживаются `http`, `https`, `socks5`, а также авторизация через
 `username/password`.
