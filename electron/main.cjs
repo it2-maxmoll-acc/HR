@@ -168,7 +168,9 @@ async function configureProxy(sess) {
   const username = String(cfg.username || "").trim();
   const password = String(cfg.password || "");
   const auth = username ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : "";
+  const redactedAuth = username ? `${encodeURIComponent(username)}:***@` : "";
   const proxyRules = `${protocol}://${auth}${host}:${port}`;
+  const proxyRulesForDiagnostics = `${protocol}://${redactedAuth}${host}:${port}`;
   const proxyBypassRules =
     Array.isArray(cfg.bypass) && cfg.bypass.length > 0
       ? cfg.bypass.map((x) => String(x).trim()).filter(Boolean).join(";")
@@ -180,7 +182,7 @@ async function configureProxy(sess) {
     proxyBypassRules,
   });
   proxyDiagnostics.applySucceeded = true;
-  proxyDiagnostics.proxyRules = proxyRules;
+  proxyDiagnostics.proxyRules = proxyRulesForDiagnostics;
   proxyDiagnostics.proxyBypassRules = proxyBypassRules;
   try {
     proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
