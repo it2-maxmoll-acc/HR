@@ -225,6 +225,12 @@ function logProxyDiagnostics(diag) {
   if (diag.userDataConfigPath) {
     console.log(`[proxy] userDataConfigPath=${diag.userDataConfigPath}`);
   }
+  if (diag.rawSocketTest) {
+    const t = diag.rawSocketTest;
+    console.log(
+      `[proxy] rawSocketTest success=${Boolean(t.success)} durationMs=${t.durationMs} error=${t.error || "<none>"}`,
+    );
+  }
   if (Array.isArray(diag.candidates)) {
     console.log("[proxy] candidates=", diag.candidates);
   }

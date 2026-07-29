@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, dialog, session, safeStorage } = require("e
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const net = require("net");
 
 const isDev = !app.isPackaged;
 const PROXY_PROBE_URL = "https://api.openai.com/v1/models";
@@ -23,7 +24,36 @@ let proxyDiagnostics = {
   warnings: [],
   error: null,
   userDataConfigPath: null,
+  rawSocketTest: null,
 };
+
+const PROXY_SOCKET_TIMEOUT_MS = 5000;
+
+// Independent low-level TCP check to the proxy host:port, bypassing Chromium's
+// network stack entirely (uses Node's own sockets, same as `curl`/OS tools).
+// This helps tell apart "Chromium/Electron can't reach the proxy" (e.g. this
+// process is blocked by a firewall/antivirus rule, while curl.exe is allowed)
+// from "the proxy is reachable but auth/tunnel to the target fails".
+function testRawSocketConnection(host, port) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const socket = net.connect({ host, port, timeout: PROXY_SOCKET_TIMEOUT_MS });
+    let settled = false;
+    const finish = (success, error) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({
+        success,
+        error: error || null,
+        durationMs: Date.now() - startedAt,
+      });
+    };
+    socket.once("connect", () => finish(true, null));
+    socket.once("timeout", () => finish(false, `timeout after ${PROXY_SOCKET_TIMEOUT_MS}ms`));
+    socket.once("error", (e) => finish(false, e?.code || e?.message || String(e)));
+  });
+}
 
 function readJsonIfExists(fp) {
   try {
@@ -184,6 +214,23 @@ async function configureProxy(sess) {
   proxyDiagnostics.applySucceeded = true;
   proxyDiagnostics.proxyRules = proxyRulesForDiagnostics;
   proxyDiagnostics.proxyBypassRules = proxyBypassRules;
+
+  proxyDiagnostics.rawSocketTest = await testRawSocketConnection(host, port);
+  if (!proxyDiagnostics.rawSocketTest.success) {
+    proxyDiagnostics.warnings.push(
+      `Raw TCP connection to proxy ${host}:${port} failed: ${proxyDiagnostics.rawSocketTest.error}. ` +
+        `If this proxy is reachable from the same machine via curl/other tools, this app's ` +
+        `process (Realtime Transcriber.exe) is likely blocked by a firewall/antivirus rule.`,
+    );
+    console.error(
+      `[proxy] Raw TCP test to ${host}:${port} FAILED: ${proxyDiagnostics.rawSocketTest.error}`,
+    );
+  } else {
+    console.log(
+      `[proxy] Raw TCP test to ${host}:${port} succeeded in ${proxyDiagnostics.rawSocketTest.durationMs}ms.`,
+    );
+  }
+
   try {
     proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
     const resolvedUpper = String(proxyDiagnostics.resolvedProxy || "").toUpperCase();
@@ -252,6 +299,16 @@ app.whenReady().then(async () => {
     proxyDiagnostics.error = e?.message || String(e);
     console.error("Failed to configure proxy:", e?.message || e);
   }
+
+  // Log real Chromium network errors (e.g. net::ERR_PROXY_CONNECTION_FAILED,
+  // net::ERR_TUNNEL_CONNECTION_FAILED) for OpenAI requests, since fetch() in the
+  // renderer only reports a generic "Failed to fetch" with no underlying reason.
+  session.defaultSession.webRequest.onErrorOccurred((details) => {
+    if (!details?.url?.includes("api.openai.com")) return;
+    console.error(
+      `[proxy] Network error for ${details.url}: ${details.error} (resourceType=${details.resourceType})`,
+    );
+  });
 
   // Allow the renderer to request microphone and desktop audio without extra prompts.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
