@@ -28,8 +28,13 @@ cp electron/proxy.config.example.json electron/proxy.config.local.json
 Приоритет загрузки конфига:
 
 1. `RT_PROXY_CONFIG` (абсолютный путь к JSON-файлу),
-2. `%APPDATA%/Realtime Transcriber/proxy.config.json`,
-3. `electron/proxy.config.local.json` (для разработки).
+2. `%APPDATA%\Realtime Transcriber\proxy.config.json` — **рекомендуется для установленного приложения**,
+3. `electron/proxy.config.local.json` — только для разработки (не попадает в .exe).
+
+> **Для установленного .exe** создайте файл
+> `%APPDATA%\Realtime Transcriber\proxy.config.json`
+> и скопируйте в него содержимое `proxy.config.example.json`,
+> выставив `"enabled": true` и заполнив данные прокси.
 
 Поддерживаются `http`, `https`, `socks5`, а также авторизация через
 `username/password`.

@@ -120,7 +120,13 @@ async function configureProxy(sess) {
     return;
   }
 
-  const proxyRules = `${protocol}://${host}:${port}`;
+  // For SOCKS5 (and other protocols), embed credentials directly in the URL.
+  // The app.on('login') event handles HTTP proxy auth (407), but SOCKS5 auth
+  // happens at the protocol level and requires credentials in the proxy URL.
+  const username = String(cfg.username || '').trim();
+  const password = String(cfg.password || '');
+  const auth = username ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : '';
+  const proxyRules = `${protocol}://${auth}${host}:${port}`;
   const proxyBypassRules =
     Array.isArray(cfg.bypass) && cfg.bypass.length > 0
       ? cfg.bypass.map((x) => String(x).trim()).filter(Boolean).join(";")
@@ -148,16 +154,11 @@ async function configureProxy(sess) {
     );
   }
 
-  const username = String(cfg.username || "").trim();
-  const password = String(cfg.password || "");
-  proxyAuth = username
-    ? {
-        username,
-        password,
-      }
-    : null;
+  // Keep proxyAuth for the login event fallback (HTTP proxies).
+  proxyAuth = username ? { username, password } : null;
   proxyDiagnostics.authConfigured = Boolean(proxyAuth);
 }
+
 
 function sanitizeProxyConfig(cfg) {
   if (!cfg || typeof cfg !== "object") return null;
