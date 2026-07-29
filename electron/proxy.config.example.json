@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "protocol": "socks5",
+  "host": "your-proxy-host.example.com",
+  "port": 1080,
+  "username": "",
+  "password": "",
+  "bypass": ["localhost", "127.0.0.1", "::1"]
+}

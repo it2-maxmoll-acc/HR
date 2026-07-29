@@ -30,3 +30,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+electron/proxy.config.local.json

@@ -12,8 +12,7 @@ const MAX_BYTES = 2 * 1024 * 1024; // 2 MB per chunk
 export const Route = createFileRoute("/api/public/transcribe")({
   server: {
     handlers: {
-      OPTIONS: async () =>
-        new Response(null, { status: 204, headers: CORS_HEADERS }),
+      OPTIONS: async () => new Response(null, { status: 204, headers: CORS_HEADERS }),
 
       POST: async ({ request }) => {
         const apiKey = process.env.LOVABLE_API_KEY;
@@ -46,28 +45,22 @@ export const Route = createFileRoute("/api/public/transcribe")({
         }
 
         const language = (form.get("language") as string) || "";
-        const model =
-          (form.get("model") as string) || "openai/gpt-4o-transcribe";
+        const model = (form.get("model") as string) || "openai/gpt-4o-transcribe";
+        const prompt = (form.get("prompt") as string) || "";
 
         const upstream = new FormData();
         upstream.append("model", model);
         if (language) upstream.append("language", language);
-        upstream.append(
-          "file",
-          audio,
-          (audio as File).name || "chunk.wav",
-        );
+        if (prompt) upstream.append("prompt", prompt);
+        upstream.append("file", audio, (audio as File).name || "chunk.wav");
 
         let providerResponse: Response;
         try {
-          providerResponse = await fetch(
-            "https://ai.gateway.lovable.dev/v1/audio/transcriptions",
-            {
-              method: "POST",
-              headers: { Authorization: `Bearer ${apiKey}` },
-              body: upstream,
-            },
-          );
+          providerResponse = await fetch("https://ai.gateway.lovable.dev/v1/audio/transcriptions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}` },
+            body: upstream,
+          });
         } catch (err) {
           return jsonError(
             502,

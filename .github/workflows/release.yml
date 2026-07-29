@@ -1,0 +1,80 @@
+name: Build & Release Windows
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        run: npm run dist:win
+
+      - name: Find installer path
+        id: find_installer
+        shell: bash
+        run: |
+          INSTALLER=$(ls dist_electron/*.exe | head -1)
+          echo "path=$INSTALLER" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$INSTALLER")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealtimeTranscriber-Windows
+          path: ${{ steps.find_installer.outputs.path }}
+          retention-days: 90
+
+      - name: Delete existing latest-build release and tag
+        shell: bash
+        run: |
+          gh release delete latest-build --yes 2>/dev/null || true
+          git push --delete origin refs/tags/latest-build 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          cat > /tmp/release_notes.md << EOF
+          Автосборка с ветки main.
+
+          Коммит: ${COMMIT_SHA}
+          Изменение: ${COMMIT_MSG}
+
+          ## Установка
+          1. Скачайте файл .exe ниже
+          2. Запустите установщик
+          3. Файл конфига прокси в %APPDATA%\Realtime Transcriber\proxy.config.json сохраняется между обновлениями
+          EOF
+
+      - name: Publish release
+        shell: bash
+        run: |
+          gh release create latest-build \
+            "${{ steps.find_installer.outputs.path }}" \
+            --title "Latest Build" \
+            --notes-file /tmp/release_notes.md \
+            --prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

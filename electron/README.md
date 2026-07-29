@@ -14,6 +14,63 @@ npm install
 npm run start:electron
 ```
 
+## Прокси (без хардкода в коде)
+
+1. Скопируйте шаблон:
+
+```bash
+cp electron/proxy.config.example.json electron/proxy.config.local.json
+```
+
+2. Впишите `host`, `port`, `username` и `password` в `electron/proxy.config.local.json`.
+   Установите `"enabled": true` для активации прокси.
+3. Приложение автоматически подхватит прокси при старте.
+
+Приоритет загрузки конфига:
+
+1. `RT_PROXY_CONFIG` (абсолютный путь к JSON-файлу),
+2. `%APPDATA%\Realtime Transcriber\proxy.config.json` — **рекомендуется для установленного приложения**,
+3. `electron/proxy.config.local.json` — только для разработки (не попадает в .exe).
+
+> **Для установленного .exe** приложение больше **не читает** `proxy.config.example.json` из `app.asar`.
+> Оно использует только `%APPDATA%\Realtime Transcriber\proxy.config.json`
+> (или `RT_PROXY_CONFIG`). Если файла нет, приложение создаст шаблон в `%APPDATA%`.
+> Откройте этот файл и заполните `username/password`.
+> По умолчанию шаблон содержит placeholder-значения. Заполните `host`, `port`, `username`, `password` и установите `"enabled": true`.
+
+Поддерживаются `http`, `https`, `socks5`, а также авторизация через `username/password`:
+
+- **SOCKS5/SOCKS4**: учётные данные **встраиваются** в URL прокси (`******host:port`).
+  Это единственный способ передать авторизацию на уровне SOCKS-протокола — обработчик `login`-события
+  Electron/Chromium для SOCKS не срабатывает.
+- **HTTP/HTTPS**: учётные данные передаются через внутренний `app.on('login')` обработчик (ответ на 407).
+  Встраивать их в URL **нельзя** — Chromium отвергает такие правила с ошибкой `ERR_NO_SUPPORTED_PROXIES`.
+
+### Диагностика, если без VPN всё равно 403
+
+1. Откройте **Системные логи** в приложении.
+2. Найдите строки `[proxy] ...`:
+   - `selected=...` — какой файл конфига реально выбран;
+   - `enabled=true/false` — включён ли прокси в выбранном файле;
+   - `applySucceeded=true/false` — применился ли прокси;
+   - `resolved=...` — маршрут до OpenAI (`DIRECT` означает, что запрос идёт без прокси).
+   - `rawSocketTest success=...` — прямая TCP-проверка до `host:port` прокси **в обход** Chromium
+     (через Node `net`, как это делает `curl`/системные утилиты). Если `success=false`,
+     а `curl -x ******host:port ...` с той же машины работает — значит именно
+     процесс приложения (исполняемый файл `Realtime Transcriber`, на Windows — `.exe`)
+     блокируется файрволом/антивирусом (частая практика — разрешать сеть по имени
+     процесса), и его нужно добавить в исключения.
+3. Если ошибки `[proxy] Network error for https://api.openai.com/...: net::ERR_...` —
+   это точная причина от Chromium (например `ERR_TUNNEL_CONNECTION_FAILED` — не прошла
+   авторизация/тоннель до цели через прокси; `ERR_PROXY_CONNECTION_FAILED` — прокси недоступен).
+4. Проверьте порядок приоритета конфига:
+   1. `RT_PROXY_CONFIG`,
+   2. `%APPDATA%/Realtime Transcriber/proxy.config.json`,
+   3. `electron/proxy.config.local.json`,
+   4. `electron/proxy.config.example.json`.
+5. Если в более приоритетном файле прокси выключен, приложение покажет предупреждение
+   в `[proxy]` логах и переключится на следующий валидный `enabled=true` конфиг.
+
 В открывшемся окне:
 
 1. Выберите микрофон (это будет **HR**).

@@ -78,6 +78,10 @@ body {
   grid-column: 1 / -1;
 }
 
+.controls .full-row {
+  grid-column: 1 / -1;
+}
+
 .controls select,
 .controls input {
   padding: 8px 10px;
@@ -141,6 +145,217 @@ body {
   cursor: not-allowed;
 }
 
+.btn.pause {
+  background: #4a3f20;
+  color: #f0c040;
+  border-color: #6b5a2a;
+}
+.btn.pause:hover:not(:disabled) {
+  background: #6b5a2a;
+}
+
+.btn.small {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* -------- proxy toggle row -------- */
+
+.proxy-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.proxy-row-label {
+  font-size: 12px;
+  color: #9aa4af;
+  min-width: 56px;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-track {
+  display: block;
+  width: 40px;
+  height: 22px;
+  background: #262c34;
+  border-radius: 11px;
+  border: 1px solid #3a414a;
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-track {
+  background: #1a4a2a;
+  border-color: #3a8b4a;
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #5a6370;
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(18px);
+  background: #4ec45e;
+}
+
+.proxy-status-text {
+  font-size: 12px;
+  color: #5a6370;
+}
+
+.proxy-status-text.active {
+  color: #4ec45e;
+}
+
+.proxy-status-text.inactive {
+  color: #5a6370;
+}
+
+.proxy-status-text.error {
+  color: #ff6b6b;
+}
+
+/* -------- history panel -------- */
+
+.history-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 420px;
+  height: 100vh;
+  background: #0f1216;
+  border-left: 1px solid #1e232a;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.5);
+}
+
+.history-panel.hidden {
+  display: none;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1e232a;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.history-loading {
+  padding: 20px 16px;
+  color: #9aa4af;
+  font-size: 13px;
+}
+
+.history-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid #1a1f26;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-row:hover {
+  background: #141820;
+}
+
+.history-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.history-name {
+  font-size: 13px;
+  color: #e6e8eb;
+}
+
+.history-size {
+  font-size: 11px;
+  color: #5a6370;
+}
+
+.history-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.history-btn {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* Session text viewer (overlays the history panel) */
+
+.history-viewer {
+  position: absolute;
+  inset: 0;
+  background: #0f1216;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+.history-viewer.hidden {
+  display: none;
+}
+
+.history-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #1e232a;
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.history-viewer-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #b0b8c4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  font-family: inherit;
+}
+
 .btn.download {
   background: #2a6b3a;
   color: #fff;
@@ -160,6 +375,10 @@ body {
 }
 
 .banner.hidden {
+  display: none;
+}
+
+label.hidden {
   display: none;
 }
 
@@ -233,7 +452,39 @@ body {
   word-wrap: break-word;
 }
 
-.text.pending {
-  color: #6b7480;
-  font-style: italic;
+/* -------- logs panel -------- */
+
+.logs-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 11px;
+}
+
+.log-entry {
+  padding: 4px 16px;
+  border-bottom: 1px solid #14181d;
+  color: #9aa4af;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.log-entry-info {
+  color: #9aa4af;
+}
+
+.log-entry-debug {
+  color: #5a6370;
+}
+
+.log-entry-warn {
+  color: #d4a017;
+  background: rgba(212, 160, 23, 0.05);
+}
+
+.log-entry-error {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.07);
 }
