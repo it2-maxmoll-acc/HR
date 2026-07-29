@@ -27,18 +27,23 @@ jobs:
 
       - name: Build Windows installer
         run: npm run dist:win
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Find installer
+      - name: Find installer path
         id: find_installer
         shell: bash
         run: |
           INSTALLER=$(ls dist_electron/*.exe | head -1)
           echo "path=$INSTALLER" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename $INSTALLER)" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$INSTALLER")" >> "$GITHUB_OUTPUT"
 
-      - name: Delete existing latest-build release (if any)
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealtimeTranscriber-Windows
+          path: ${{ steps.find_installer.outputs.path }}
+          retention-days: 90
+
+      - name: Delete existing latest-build release and tag
         shell: bash
         run: |
           gh release delete latest-build --yes 2>/dev/null || true
@@ -46,30 +51,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create GitHub Release
-        uses: actions/upload-artifact@v4
-        with:
-          name: RealtimeTranscriber-Windows
-          path: ${{ steps.find_installer.outputs.path }}
-          retention-days: 90
+      - name: Write release notes
+        shell: bash
+        run: |
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          cat > /tmp/release_notes.md << EOF
+          Автосборка с ветки main.
+
+          Коммит: ${COMMIT_SHA}
+          Изменение: ${COMMIT_MSG}
+
+          ## Установка
+          1. Скачайте файл .exe ниже
+          2. Запустите установщик
+          3. Файл конфига прокси в %APPDATA%\Realtime Transcriber\proxy.config.json сохраняется между обновлениями
+          EOF
 
       - name: Publish release
         shell: bash
         run: |
-          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
-          COMMIT_SHA=$(git rev-parse --short HEAD)
           gh release create latest-build \
             "${{ steps.find_installer.outputs.path }}" \
-            --title "Latest Build (${COMMIT_SHA})" \
-            --notes "Автосборка с ветки main.
-
-Коммит: ${COMMIT_SHA}
-Изменение: ${COMMIT_MSG}
-
-## Установка
-1. Скачайте \`${{ steps.find_installer.outputs.name }}\`
-2. Запустите установщик
-3. Файл конфига прокси в \`%APPDATA%\\Realtime Transcriber\\proxy.config.json\` сохраняется между обновлениями" \
+            --title "Latest Build" \
+            --notes-file /tmp/release_notes.md \
             --prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
