@@ -38,10 +38,13 @@ cp electron/proxy.config.example.json electron/proxy.config.local.json
 > Откройте этот файл и заполните `username/password`.
 > По умолчанию шаблон содержит placeholder-значения. Заполните `host`, `port`, `username`, `password` и установите `"enabled": true`.
 
-Поддерживаются `http`, `https`, `socks5`, а также авторизация через
-`username/password` (аутентификация передаётся через внутренний обработчик —
-учётные данные **не** встраиваются в URL прокси, т.к. Electron/Chromium их
-отвергает для любого протокола и выдаёт `ERR_NO_SUPPORTED_PROXIES`).
+Поддерживаются `http`, `https`, `socks5`, а также авторизация через `username/password`:
+
+- **SOCKS5/SOCKS4**: учётные данные **встраиваются** в URL прокси (`******host:port`).
+  Это единственный способ передать авторизацию на уровне SOCKS-протокола — обработчик `login`-события
+  Electron/Chromium для SOCKS не срабатывает.
+- **HTTP/HTTPS**: учётные данные передаются через внутренний `app.on('login')` обработчик (ответ на 407).
+  Встраивать их в URL **нельзя** — Chromium отвергает такие правила с ошибкой `ERR_NO_SUPPORTED_PROXIES`.
 
 ### Диагностика, если без VPN всё равно 403
 

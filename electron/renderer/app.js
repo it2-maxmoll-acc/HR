@@ -799,21 +799,24 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
   const endpoint = "https://api.openai.com/v1/audio/transcriptions";
   const headers = { Authorization: "Bearer " + apiKey };
 
-  const form = new FormData();
-  form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
-  form.append("model", model);
-  form.append("language", "ru");
-  form.append(
-    "prompt",
-    "Числа пиши арабскими цифрами. Знаки препинания расставляй точно. Пиши каждое слово отдельно.",
-  );
-
   // Retry indefinitely on 429 (rate limit) so nothing is ever dropped.
   // Each loop iteration checks state.recording so the loop exits cleanly when
   // the user stops recording while a retry is pending.
+  // FormData is rebuilt on every attempt because the body stream is consumed
+  // by the first fetch call — reusing the same object sends an empty body.
   let attempt = 0;
   while (true) {
     if (!state.recording) return;
+
+    const form = new FormData();
+    form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
+    form.append("model", model);
+    form.append("language", "ru");
+    form.append(
+      "prompt",
+      "Числа пиши арабскими цифрами. Знаки препинания расставляй точно. Пиши каждое слово отдельно.",
+    );
+
     let res, data;
     try {
       res = await fetch(endpoint, {
