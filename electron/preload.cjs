@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("api", {
   },
   getProxyDiagnostics: () => ipcRenderer.invoke("get-proxy-diagnostics"),
   toggleProxy: (enable) => ipcRenderer.invoke("toggle-proxy", enable),
+  updateProxyConfig: (updates) => ipcRenderer.invoke("update-proxy-config", updates),
 
   // Session history
   listSessions: () => ipcRenderer.invoke("list-sessions"),

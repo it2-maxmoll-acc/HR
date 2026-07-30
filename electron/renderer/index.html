@@ -66,6 +66,11 @@
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
         <span id="proxy-status-text" class="proxy-status-text">загрузка…</span>
+        <label class="proxy-auto-label hidden" id="proxy-auto-fallback-row"
+          title="Если прокси не работает — автоматически переключиться на прямое подключение. Включите при использовании системного VPN (WireGuard, OpenVPN и др.)">
+          <input type="checkbox" id="proxy-auto-fallback" />
+          <span class="proxy-auto-text">Авто (VPN)</span>
+        </label>
       </div>
       <div class="buttons">
         <button id="start" class="btn primary">▶ Начать запись</button>

@@ -44,6 +44,8 @@ const els = {
   proxyRow: document.getElementById("proxy-row"),
   proxyEnabled: document.getElementById("proxy-enabled"),
   proxyStatusText: document.getElementById("proxy-status-text"),
+  proxyAutoFallback: document.getElementById("proxy-auto-fallback"),
+  proxyAutoFallbackRow: document.getElementById("proxy-auto-fallback-row"),
 };
 
 const state = {
@@ -312,6 +314,28 @@ function initProxyToggle(diag) {
   const currentlyEnabled = Boolean(diag?.runtimeEnabled);
   els.proxyEnabled.checked = currentlyEnabled;
   setProxyStatusText(currentlyEnabled);
+
+  // Auto (VPN) checkbox — show it whenever a config is present.
+  if (els.proxyAutoFallback && els.proxyAutoFallbackRow) {
+    els.proxyAutoFallbackRow.classList.remove("hidden");
+    els.proxyAutoFallback.checked = Boolean(diag?.selectedConfig?.autoDirectFallback);
+
+    els.proxyAutoFallback.addEventListener("change", async () => {
+      const enable = els.proxyAutoFallback.checked;
+      try {
+        const result = await window.api.updateProxyConfig?.({ autoDirectFallback: enable });
+        if (!result?.ok) {
+          console.error("[proxy] updateProxyConfig failed:", result?.error);
+          els.proxyAutoFallback.checked = !enable;
+          return;
+        }
+        console.log(`[proxy] autoDirectFallback set to ${enable}`);
+      } catch (e) {
+        console.error("[proxy] updateProxyConfig error:", e?.message || e);
+        els.proxyAutoFallback.checked = !enable;
+      }
+    });
+  }
 
   els.proxyEnabled.addEventListener("change", async () => {
     const enable = els.proxyEnabled.checked;

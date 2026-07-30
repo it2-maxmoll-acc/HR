@@ -237,6 +237,28 @@ body {
   color: #ff6b6b;
 }
 
+.proxy-auto-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  margin-left: 6px;
+  font-size: 12px;
+  color: #9aa4af;
+  user-select: none;
+}
+
+.proxy-auto-label input[type="checkbox"] {
+  accent-color: #4ec45e;
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+}
+
+.proxy-auto-text {
+  white-space: nowrap;
+}
+
 /* -------- history panel -------- */
 
 .history-panel {
