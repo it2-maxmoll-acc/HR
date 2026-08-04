@@ -1,11 +1,11 @@
 // Realtime Transcriber — renderer
 
-const CHUNK_MS = 2500; // window length
-const OVERLAP_MS = 400; // overlap between chunks so words aren't cut
+const CHUNK_MS = 1500; // window length (shorter = lower latency)
+const OVERLAP_MS = 300; // overlap between chunks so words aren't cut
 const SAMPLE_RATE = 16000;
-// Allow one delayed chunk or network jitter before starting a new phrase line.
-const MERGE_TOLERANCE_MS = 1500;
-// 4s merge window total: 2.5s chunk + 1.5s tolerance.
+// Allow several delayed chunks or network jitter before starting a new phrase line.
+const MERGE_TOLERANCE_MS = 5000;
+// Merge window total: CHUNK_MS + MERGE_TOLERANCE_MS.
 const MERGE_GAP_MS = CHUNK_MS + MERGE_TOLERANCE_MS;
 // Detect and remove up to this many repeated boundary words from overlap.
 const MAX_OVERLAP_WORDS = 8;
@@ -534,6 +534,8 @@ async function start() {
     state.startedAt = performance.now();
     state.messages = [];
     state.nextId = 1;
+    _typewriterState.forEach((s) => { if (s.timer) clearTimeout(s.timer); });
+    _typewriterState.clear();
     els.log.innerHTML = "";
     window.api.clearLines?.();
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
@@ -1094,6 +1096,61 @@ function normalizeWord(word) {
     .replace(/[^\p{L}\p{N}]+$/gu, "");
 }
 
+// -------- typewriter engine --------
+// Per-message state: { target: string, displayed: string, timer: id | null }
+const _typewriterState = new Map(); // msgId → { target, displayed, timer }
+const TYPEWRITER_CHAR_MS = 18; // ms per character (~55 chars/s)
+
+function typewriterSet(msgId, fullText) {
+  let s = _typewriterState.get(msgId);
+  if (!s) {
+    s = { target: fullText, displayed: "", timer: null };
+    _typewriterState.set(msgId, s);
+  } else {
+    s.target = fullText;
+  }
+  if (!s.timer) _typewriterTick(msgId);
+}
+
+function _typewriterTick(msgId) {
+  const s = _typewriterState.get(msgId);
+  if (!s) return;
+  if (s.displayed.length >= s.target.length) {
+    // Done — ensure final text is shown, remove cursor
+    s.timer = null;
+    _typewriterFlush(msgId);
+    return;
+  }
+  // Advance by one character
+  s.displayed = s.target.slice(0, s.displayed.length + 1);
+  _typewriterFlush(msgId);
+  s.timer = setTimeout(() => _typewriterTick(msgId), TYPEWRITER_CHAR_MS);
+}
+
+function _typewriterFlush(msgId) {
+  const s = _typewriterState.get(msgId);
+  if (!s) return;
+  const node = els.log.querySelector(`[data-id="${msgId}"]`);
+  if (!node) return;
+  const t = node.querySelector(".text");
+  const isTyping = s.displayed.length < s.target.length;
+  // Show displayed text + blinking cursor while still typing
+  t.textContent = s.displayed;
+  if (isTyping) {
+    node.classList.add("typing");
+  } else {
+    node.classList.remove("typing");
+    _typewriterState.delete(msgId);
+  }
+  els.log.scrollTop = els.log.scrollHeight;
+}
+
+function typewriterClear(msgId) {
+  const s = _typewriterState.get(msgId);
+  if (s?.timer) clearTimeout(s.timer);
+  _typewriterState.delete(msgId);
+}
+
 function renderMessage(msg) {
   const node = document.createElement("div");
   node.className = "msg";
@@ -1102,21 +1159,21 @@ function renderMessage(msg) {
     `<span class="badge ${msg.role === "HR" ? "hr" : "cand"}">${msg.role}</span>` +
     `<span class="ts">[${fmtTs(msg.tsMs)}]</span>` +
     `<span class="text"></span>`;
-  node.querySelector(".text").textContent = msg.text;
   els.log.appendChild(node);
   els.log.scrollTop = els.log.scrollHeight;
   toggleDownload();
+  typewriterSet(msg.id, msg.text);
 }
 
 function updateMessage(msg) {
   const node = els.log.querySelector(`[data-id="${msg.id}"]`);
   if (!node) return;
-  const t = node.querySelector(".text");
-  t.textContent = msg.text;
+  typewriterSet(msg.id, msg.text);
   toggleDownload();
 }
 
 function removeMessage(id) {
+  typewriterClear(id);
   const node = els.log.querySelector(`[data-id="${id}"]`);
   node?.remove();
   toggleDownload();

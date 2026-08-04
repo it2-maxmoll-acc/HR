@@ -491,6 +491,18 @@ label.hidden {
   word-wrap: break-word;
 }
 
+/* Blinking cursor while text is being typed */
+.msg.typing .text::after {
+  content: "▋";
+  color: #4c9eff;
+  animation: blink-cursor 0.7s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* -------- logs panel -------- */
 
 .logs-list {
