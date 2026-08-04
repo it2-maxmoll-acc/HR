@@ -510,3 +510,44 @@ label.hidden {
   color: #ff6b6b;
   background: rgba(255, 107, 107, 0.07);
 }
+/* -------- mic test row & meter -------- */
+
+.mic-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.mic-row select {
+  flex: 1;
+}
+
+.mic-meter-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  height: 16px;
+}
+
+.mic-meter-wrap.hidden {
+  display: none;
+}
+
+.mic-meter-bar {
+  height: 10px;
+  width: 0%;
+  border-radius: 5px;
+  background: #4c8bf5;
+  transition: width 0.08s ease, background 0.08s ease;
+  flex: 1;
+  max-width: 160px;
+  min-width: 0;
+}
+
+.mic-meter-label {
+  font-size: 11px;
+  color: #9aa4af;
+  min-width: 28px;
+  text-align: right;
+}

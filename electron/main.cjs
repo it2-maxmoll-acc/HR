@@ -647,11 +647,13 @@ ipcMain.handle("list-sessions", async () => {
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)
-    .filter((f) => f.endsWith(".txt"))
+    .filter((f) => f.endsWith(".txt") && !f.endsWith(".label.txt"))
     .map((f) => {
       const fp = path.join(dir, f);
       const stat = fs.statSync(fp);
-      return { filename: f, size: stat.size, mtime: stat.mtimeMs };
+      const labelFile = path.join(dir, f.replace(/\.txt$/, ".label.txt"));
+      const label = fs.existsSync(labelFile) ? fs.readFileSync(labelFile, "utf8").trim() : "";
+      return { filename: f, size: stat.size, mtime: stat.mtimeMs, label };
     })
     .sort((a, b) => b.mtime - a.mtime);
 });
@@ -662,6 +664,25 @@ ipcMain.handle("delete-session", async (_evt, filename) => {
   const dir = path.join(app.getPath("userData"), "sessions");
   const fp = path.join(dir, safeFilename);
   if (fs.existsSync(fp)) fs.unlinkSync(fp);
+  // Also remove label sidecar if present.
+  const labelFile = path.join(dir, safeFilename.replace(/\.txt$/, ".label.txt"));
+  if (fs.existsSync(labelFile)) fs.unlinkSync(labelFile);
+  return { ok: true };
+});
+
+ipcMain.handle("rename-session", async (_evt, filename, label) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { ok: false, error: "Invalid filename" };
+  if (typeof label !== "string") return { ok: false, error: "Invalid label" };
+  const safeLabel = label.slice(0, 200).replace(/[\r\n]/g, " ");
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const labelFile = path.join(dir, safeFilename.replace(/\.txt$/, ".label.txt"));
+  if (safeLabel) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(labelFile, safeLabel, "utf8");
+  } else if (fs.existsSync(labelFile)) {
+    fs.unlinkSync(labelFile);
+  }
   return { ok: true };
 });
 

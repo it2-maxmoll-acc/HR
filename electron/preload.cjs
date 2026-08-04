@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("api", {
   // Session history
   listSessions: () => ipcRenderer.invoke("list-sessions"),
   deleteSession: (filename) => ipcRenderer.invoke("delete-session", filename),
+  renameSession: (filename, label) => ipcRenderer.invoke("rename-session", filename, label),
   loadSession: (filename) => ipcRenderer.invoke("load-session", filename),
 
   // Secure API key storage (uses OS keychain via Electron safeStorage)

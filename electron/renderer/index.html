@@ -22,7 +22,14 @@
     <section class="controls">
       <label>
         <span>Микрофон (HR)</span>
-        <select id="mic-select"></select>
+        <div class="mic-row">
+          <select id="mic-select"></select>
+          <button id="mic-test" class="btn ghost small" type="button" title="Проверить микрофон">🎙 Тест</button>
+        </div>
+        <div id="mic-meter-wrap" class="mic-meter-wrap hidden">
+          <div id="mic-meter-bar" class="mic-meter-bar"></div>
+          <span id="mic-meter-label" class="mic-meter-label">0%</span>
+        </div>
       </label>
       <label>
         <span>Системный звук (Кандидат)</span>

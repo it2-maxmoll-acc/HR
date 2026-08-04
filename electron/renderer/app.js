@@ -46,6 +46,10 @@ const els = {
   proxyStatusText: document.getElementById("proxy-status-text"),
   proxyAutoFallback: document.getElementById("proxy-auto-fallback"),
   proxyAutoFallbackRow: document.getElementById("proxy-auto-fallback-row"),
+  micTest: document.getElementById("mic-test"),
+  micMeterWrap: document.getElementById("mic-meter-wrap"),
+  micMeterBar: document.getElementById("mic-meter-bar"),
+  micMeterLabel: document.getElementById("mic-meter-label"),
 };
 
 const state = {
@@ -153,6 +157,79 @@ els.logsBtn.addEventListener("click", openLogsPanel);
 els.logsClose.addEventListener("click", closeLogsPanel);
 els.logsClear.addEventListener("click", clearLogs);
 els.logsCopy.addEventListener("click", copyLogs);
+
+// -------- mic test --------
+
+let _micTestStream = null;
+let _micTestCtx = null;
+let _micTestAnalyser = null;
+let _micTestRaf = null;
+let _micTestActive = false;
+
+async function startMicTest() {
+  const deviceId = els.mic.value;
+  try {
+    _micTestStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
+  } catch (e) {
+    showBanner("Не удалось открыть микрофон: " + e.message);
+    return;
+  }
+  _micTestCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = _micTestCtx.createMediaStreamSource(_micTestStream);
+  _micTestAnalyser = _micTestCtx.createAnalyser();
+  _micTestAnalyser.fftSize = 256;
+  source.connect(_micTestAnalyser);
+  // Do NOT connect to destination — no playback.
+
+  els.micMeterWrap.classList.remove("hidden");
+  els.micTest.textContent = "⏹ Стоп";
+  _micTestActive = true;
+
+  const data = new Uint8Array(_micTestAnalyser.frequencyBinCount);
+  function tick() {
+    if (!_micTestActive) return;
+    _micTestRaf = requestAnimationFrame(tick);
+    _micTestAnalyser.getByteFrequencyData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    const avg = sum / data.length;
+    const pct = Math.min(100, Math.round((avg / 255) * 100 * 3));
+    els.micMeterBar.style.width = pct + "%";
+    els.micMeterBar.style.background = pct > 70 ? "#ff6b6b" : pct > 30 ? "#f0a500" : "#4c8bf5";
+    els.micMeterLabel.textContent = pct + "%";
+  }
+  tick();
+}
+
+function stopMicTest() {
+  _micTestActive = false;
+  if (_micTestRaf) { cancelAnimationFrame(_micTestRaf); _micTestRaf = null; }
+  if (_micTestStream) { _micTestStream.getTracks().forEach((t) => t.stop()); _micTestStream = null; }
+  if (_micTestCtx) { _micTestCtx.close().catch(() => {}); _micTestCtx = null; }
+  _micTestAnalyser = null;
+  els.micMeterWrap.classList.add("hidden");
+  els.micMeterBar.style.width = "0%";
+  els.micMeterLabel.textContent = "0%";
+  els.micTest.textContent = "🎙 Тест";
+}
+
+els.micTest.addEventListener("click", () => {
+  if (_micTestActive) {
+    stopMicTest();
+  } else {
+    startMicTest();
+  }
+});
+
+// Stop mic test when recording starts.
+// (handled inline in start() body via stopMicTest call)
 
 // -------- logging system --------
 
@@ -418,6 +495,8 @@ function toggleDownload() {
 async function start() {
   if (state.recording) return;
   hideBanner();
+  // Stop mic test if running so it doesn't interfere with the recording stream.
+  if (_micTestActive) stopMicTest();
   els.start.disabled = true;
   els.stop.disabled = false;
   els.pause.disabled = false;
@@ -561,9 +640,6 @@ async function stop() {
     console.warn("autosave on stop", e);
   }
   _currentSessionFile = null;
-
-  // Prompt user to save as .txt.
-  await saveTranscript(true);
 }
 
 function updateStatus(recording) {
@@ -653,8 +729,15 @@ async function startCapture(role, stream) {
     }
   };
 
+  // Route through a silent gain node (gain=0) so onaudioprocess fires but
+  // no audio is played back through the speakers. Playing mic audio back
+  // through the speakers would be captured by the system loopback (Кандидат)
+  // stream, causing the candidate's transcription to be duplicated under HR.
+  const silentSink = audioCtx.createGain();
+  silentSink.gain.value = 0;
   source.connect(processor);
-  processor.connect(audioCtx.destination); // required for onaudioprocess to fire
+  processor.connect(silentSink);
+  silentSink.connect(audioCtx.destination);
 
   state.captures.push(cap);
 }
@@ -733,11 +816,14 @@ const PROMPT_FRAGMENTS = [
   "числа пиши арабскими цифрами",
   "знаки препинания расставляй точно",
   "пиши каждое слово отдельно",
+  "не используй многоточие",
+  "не повторяй слова и фразы",
 ];
 
 function isLikelyHallucination(text) {
   const normalized = text
     .toLowerCase()
+    .replace(/\.{2,}/g, "") // strip ellipsis sequences before other checks
     .replace(/[.!?,\s]+$/g, "")
     .replace(/^[.!?,\s]+/g, "")
     .trim();
@@ -838,7 +924,7 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     form.append("language", "ru");
     form.append(
       "prompt",
-      "Числа пиши арабскими цифрами. Знаки препинания расставляй точно. Пиши каждое слово отдельно.",
+      "Числа пиши арабскими цифрами. Знаки препинания расставляй точно. Пиши каждое слово отдельно. Не используй многоточие. Не повторяй слова и фразы.",
     );
 
     let res, data;
@@ -897,8 +983,10 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     // Success — clear any lingering error banner.
     hideBanner();
     console.log(`[sendChunk] ok role=${role} chunkIndex=${chunkIndex}`);
-    const text = (data.text || "").trim();
-    if (text && !isLikelyHallucination(text) && hasEnoughCyrillic(text)) {
+    const rawText = (data.text || "").trim();
+    // Strip excessive ellipsis sequences the model sometimes produces.
+    const text = rawText.replace(/\.{2,}/g, "").replace(/\s{2,}/g, " ").trim();
+    if (text && !isLikelyHallucination(rawText) && hasEnoughCyrillic(text)) {
       addOrMergeMessage(role, tsMs, text, chunkIndex);
     }
     return;
@@ -1080,15 +1168,17 @@ async function refreshHistoryList() {
     // Format filename → readable date
     const datePart = s.filename.replace(/^session_/, "").replace(/\.txt$/, "");
     // datePart: 2026-07-28T12-30-45 → 28.07.2026 12:30:45
-    const label = formatSessionDate(datePart);
+    const dateLabel = formatSessionDate(datePart);
+    const displayLabel = s.label ? escapeHtml(s.label) : dateLabel;
     const kb = Math.round(s.size / 1024 * 10) / 10;
 
     row.innerHTML =
       `<div class="history-info">` +
-        `<span class="history-name">${label}</span>` +
+        `<span class="history-name" title="${dateLabel}">${displayLabel}</span>` +
         `<span class="history-size">${kb} КБ</span>` +
       `</div>` +
       `<div class="history-actions">` +
+        `<button class="btn ghost history-btn" data-action="rename" data-file="${s.filename}" data-label="${escapeHtml(s.label || "")}">✏</button>` +
         `<button class="btn ghost history-btn" data-action="view" data-file="${s.filename}">Открыть</button>` +
         `<button class="btn primary history-btn" data-action="continue" data-file="${s.filename}">Продолжить</button>` +
         `<button class="btn danger history-btn" data-action="delete" data-file="${s.filename}">Удалить</button>` +
@@ -1105,6 +1195,19 @@ async function onHistoryAction(e) {
   if (!btn) return;
   const action = btn.dataset.action;
   const filename = btn.dataset.file;
+
+  if (action === "rename") {
+    const currentLabel = btn.dataset.label || "";
+    const newLabel = prompt("Введите название записи:", currentLabel);
+    if (newLabel === null) return; // cancelled
+    try {
+      await window.api.renameSession(filename, newLabel.trim());
+      await refreshHistoryList();
+    } catch (err) {
+      showBanner("Не удалось переименовать: " + err.message);
+    }
+    return;
+  }
 
   if (action === "delete") {
     if (!confirm(`Удалить запись «${formatSessionDate(filename.replace(/^session_|\.txt$/g, ""))}»?`)) return;
@@ -1184,4 +1287,12 @@ function formatSessionDate(datePart) {
     return `${parts[2]}.${parts[1]}.${parts[0]}`;
   }
   return datePart;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
