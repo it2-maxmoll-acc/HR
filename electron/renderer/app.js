@@ -1200,19 +1200,25 @@ async function refreshHistoryList() {
     const datePart = s.filename.replace(/^session_/, "").replace(/\.txt$/, "");
     // datePart: 2026-07-28T12-30-45 → 28.07.2026 12:30:45
     const dateLabel = formatSessionDate(datePart);
-    const displayLabel = s.label ? escapeHtml(s.label) : dateLabel;
+    // Global position in full (unfiltered) list for default name "Запись N"
+    const globalIndex = sessions.indexOf(s) + 1;
+    const defaultName = `Запись ${globalIndex}`;
+    const displayLabel = s.label ? escapeHtml(s.label) : defaultName;
     const kb = Math.round(s.size / 1024 * 10) / 10;
     const starLabel = s.favorite ? "★" : "☆";
     const starClass = s.favorite ? "history-star active" : "history-star";
 
     row.innerHTML =
       `<div class="history-info">` +
-        `<span class="history-name" title="${dateLabel}">${displayLabel}</span>` +
+        `<div class="history-info-text">` +
+          `<span class="history-name" title="${dateLabel}">${displayLabel}</span>` +
+          `<span class="history-date">${dateLabel}</span>` +
+        `</div>` +
         `<span class="history-size">${kb} КБ</span>` +
       `</div>` +
       `<div class="history-actions">` +
         `<button class="${starClass}" data-action="favorite" data-file="${s.filename}" title="Добавить в избранное">${starLabel}</button>` +
-        `<button class="btn ghost history-btn" data-action="rename" data-file="${s.filename}" data-label="${escapeHtml(s.label || "")}">✏</button>` +
+        `<button class="btn ghost history-btn" data-action="rename" data-file="${s.filename}" data-label="${escapeHtml(s.label || "")}" data-default="${escapeHtml(defaultName)}">✏</button>` +
         `<button class="btn ghost history-btn" data-action="view" data-file="${s.filename}">Открыть</button>` +
         `<button class="btn primary history-btn" data-action="continue" data-file="${s.filename}">Продолжить</button>` +
         `<button class="btn danger history-btn" data-action="delete" data-file="${s.filename}">Удалить</button>` +
@@ -1241,7 +1247,7 @@ async function onHistoryAction(e) {
   }
 
   if (action === "rename") {
-    openRenameModal(filename, btn.dataset.label || "");
+    openRenameModal(filename, btn.dataset.label || btn.dataset.default || "");
     return;
   }
 

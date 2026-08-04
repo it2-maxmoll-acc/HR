@@ -316,17 +316,34 @@ body {
 .history-info {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+}
+
+.history-info-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .history-name {
   font-size: 13px;
   color: #e6e8eb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-date {
+  font-size: 11px;
+  color: #5a6370;
 }
 
 .history-size {
   font-size: 11px;
   color: #5a6370;
+  flex-shrink: 0;
+  margin-left: 8px;
 }
 
 .history-actions {
