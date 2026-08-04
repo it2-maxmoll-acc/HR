@@ -1352,9 +1352,10 @@ function openRenameModal(filename, currentLabel) {
 
   els.renameConfirm.onclick = async () => {
     const newLabel = els.renameInput.value.trim();
+    const filenameToRename = _renameFilename;
     closeRenameModal();
     try {
-      await window.api.renameSession(_renameFilename, newLabel);
+      await window.api.renameSession(filenameToRename, newLabel);
       await refreshHistoryList();
     } catch (err) {
       showBanner("Не удалось переименовать: " + err.message);
