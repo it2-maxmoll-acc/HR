@@ -551,3 +551,112 @@ label.hidden {
   min-width: 28px;
   text-align: right;
 }
+
+/* -------- history tabs -------- */
+
+.history-tabs {
+  display: flex;
+  border-bottom: 1px solid #1e232a;
+  flex-shrink: 0;
+}
+
+.history-tab {
+  flex: 1;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #9aa4af;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.history-tab:hover {
+  color: #e6e8eb;
+}
+
+.history-tab.active {
+  color: #4c8bf5;
+  border-bottom-color: #4c8bf5;
+}
+
+/* -------- star / favorite button -------- */
+
+.history-star {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: #5a6370;
+  padding: 4px 6px;
+  line-height: 1;
+  transition: color 0.15s, transform 0.1s;
+  border-radius: 4px;
+}
+
+.history-star:hover {
+  color: #f5c542;
+  transform: scale(1.15);
+}
+
+.history-star.active {
+  color: #f5c542;
+}
+
+/* -------- rename modal -------- */
+
+.rename-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.rename-modal.hidden {
+  display: none;
+}
+
+.rename-modal-box {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 20px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.rename-modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e6e8eb;
+  margin: 0;
+}
+
+.rename-input {
+  width: 100%;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #e6e8eb;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.rename-input:focus {
+  border-color: #4c8bf5;
+}
+
+.rename-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

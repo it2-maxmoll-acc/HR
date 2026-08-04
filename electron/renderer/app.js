@@ -35,6 +35,10 @@ const els = {
   historyViewer: document.getElementById("history-viewer"),
   historyViewerContent: document.getElementById("history-viewer-content"),
   historyViewerClose: document.getElementById("history-viewer-close"),
+  renameModal: document.getElementById("rename-modal"),
+  renameInput: document.getElementById("rename-input"),
+  renameCancel: document.getElementById("rename-cancel"),
+  renameConfirm: document.getElementById("rename-confirm"),
   logsBtn: document.getElementById("logs-btn"),
   logsPanel: document.getElementById("logs-panel"),
   logsList: document.getElementById("logs-list"),
@@ -60,6 +64,7 @@ const state = {
   captures: [], // { role, stream, audioCtx, source, processor, buffer, chunkIndex }
   messages: [], // { role, tsMs, lastTsMs, text, id }
   nextId: 1,
+  historyTab: "all", // "all" | "favorites"
 };
 
 // Current session file for autosave (set on start, cleared on stop).
@@ -153,6 +158,25 @@ els.overlay.addEventListener("click", () => window.api.openOverlay?.());
 els.history.addEventListener("click", openHistoryPanel);
 els.historyClose.addEventListener("click", closeHistoryPanel);
 els.historyViewerClose.addEventListener("click", () => els.historyViewer.classList.add("hidden"));
+
+// History tabs
+document.getElementById("history-panel").addEventListener("click", (e) => {
+  const tab = e.target.closest(".history-tab");
+  if (!tab) return;
+  const tabName = tab.dataset.tab;
+  if (tabName === state.historyTab) return;
+  state.historyTab = tabName;
+  document.querySelectorAll(".history-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tabName));
+  refreshHistoryList();
+});
+
+// Rename modal
+els.renameCancel.addEventListener("click", closeRenameModal);
+els.renameModal.addEventListener("click", (e) => { if (e.target === els.renameModal) closeRenameModal(); });
+els.renameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") els.renameConfirm.click();
+  if (e.key === "Escape") closeRenameModal();
+});
 els.logsBtn.addEventListener("click", openLogsPanel);
 els.logsClose.addEventListener("click", closeLogsPanel);
 els.logsClear.addEventListener("click", clearLogs);
@@ -1156,12 +1180,19 @@ async function refreshHistoryList() {
     els.historyList.innerHTML = '<p class="history-loading">Ошибка загрузки истории.</p>';
     return;
   }
-  if (sessions.length === 0) {
-    els.historyList.innerHTML = '<p class="history-loading">Сохранённых записей нет.</p>';
+
+  const filtered = state.historyTab === "favorites"
+    ? sessions.filter(s => s.favorite)
+    : sessions;
+
+  if (filtered.length === 0) {
+    els.historyList.innerHTML = state.historyTab === "favorites"
+      ? '<p class="history-loading">Нет избранных записей.</p>'
+      : '<p class="history-loading">Сохранённых записей нет.</p>';
     return;
   }
   els.historyList.innerHTML = "";
-  for (const s of sessions) {
+  for (const s of filtered) {
     const row = document.createElement("div");
     row.className = "history-row";
 
@@ -1171,6 +1202,8 @@ async function refreshHistoryList() {
     const dateLabel = formatSessionDate(datePart);
     const displayLabel = s.label ? escapeHtml(s.label) : dateLabel;
     const kb = Math.round(s.size / 1024 * 10) / 10;
+    const starLabel = s.favorite ? "★" : "☆";
+    const starClass = s.favorite ? "history-star active" : "history-star";
 
     row.innerHTML =
       `<div class="history-info">` +
@@ -1178,6 +1211,7 @@ async function refreshHistoryList() {
         `<span class="history-size">${kb} КБ</span>` +
       `</div>` +
       `<div class="history-actions">` +
+        `<button class="${starClass}" data-action="favorite" data-file="${s.filename}" title="Добавить в избранное">${starLabel}</button>` +
         `<button class="btn ghost history-btn" data-action="rename" data-file="${s.filename}" data-label="${escapeHtml(s.label || "")}">✏</button>` +
         `<button class="btn ghost history-btn" data-action="view" data-file="${s.filename}">Открыть</button>` +
         `<button class="btn primary history-btn" data-action="continue" data-file="${s.filename}">Продолжить</button>` +
@@ -1196,16 +1230,18 @@ async function onHistoryAction(e) {
   const action = btn.dataset.action;
   const filename = btn.dataset.file;
 
-  if (action === "rename") {
-    const currentLabel = btn.dataset.label || "";
-    const newLabel = prompt("Введите название записи:", currentLabel);
-    if (newLabel === null) return; // cancelled
+  if (action === "favorite") {
     try {
-      await window.api.renameSession(filename, newLabel.trim());
+      await window.api.toggleFavorite(filename);
       await refreshHistoryList();
     } catch (err) {
-      showBanner("Не удалось переименовать: " + err.message);
+      showBanner("Не удалось обновить избранное: " + err.message);
     }
+    return;
+  }
+
+  if (action === "rename") {
+    openRenameModal(filename, btn.dataset.label || "");
     return;
   }
 
@@ -1295,4 +1331,32 @@ function escapeHtml(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// -------- rename modal --------
+
+let _renameFilename = null;
+
+function openRenameModal(filename, currentLabel) {
+  _renameFilename = filename;
+  els.renameInput.value = currentLabel;
+  els.renameModal.classList.remove("hidden");
+  els.renameInput.focus();
+  els.renameInput.select();
+
+  els.renameConfirm.onclick = async () => {
+    const newLabel = els.renameInput.value.trim();
+    closeRenameModal();
+    try {
+      await window.api.renameSession(_renameFilename, newLabel);
+      await refreshHistoryList();
+    } catch (err) {
+      showBanner("Не удалось переименовать: " + err.message);
+    }
+  };
+}
+
+function closeRenameModal() {
+  els.renameModal.classList.add("hidden");
+  _renameFilename = null;
 }

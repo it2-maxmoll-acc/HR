@@ -107,6 +107,10 @@
         <span>История записей</span>
         <button id="history-close" class="btn ghost small">✕ Закрыть</button>
       </div>
+      <div class="history-tabs">
+        <button class="history-tab active" data-tab="all">Все</button>
+        <button class="history-tab" data-tab="favorites">★ Избранные</button>
+      </div>
       <div id="history-list" class="history-list"></div>
       <!-- Session text viewer -->
       <div id="history-viewer" class="history-viewer hidden">
@@ -132,5 +136,17 @@
     </div>
 
     <script type="module" src="app.js"></script>
+
+    <!-- ====== Rename modal ====== -->
+    <div id="rename-modal" class="rename-modal hidden">
+      <div class="rename-modal-box">
+        <p class="rename-modal-title">Название записи</p>
+        <input id="rename-input" class="rename-input" type="text" maxlength="200" placeholder="Введите название…" />
+        <div class="rename-modal-actions">
+          <button id="rename-cancel" class="btn ghost small">Отмена</button>
+          <button id="rename-confirm" class="btn primary small">Сохранить</button>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

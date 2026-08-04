@@ -653,7 +653,9 @@ ipcMain.handle("list-sessions", async () => {
       const stat = fs.statSync(fp);
       const labelFile = path.join(dir, f.replace(/\.txt$/, ".label.txt"));
       const label = fs.existsSync(labelFile) ? fs.readFileSync(labelFile, "utf8").trim() : "";
-      return { filename: f, size: stat.size, mtime: stat.mtimeMs, label };
+      const favFile = path.join(dir, f.replace(/\.txt$/, ".fav"));
+      const favorite = fs.existsSync(favFile);
+      return { filename: f, size: stat.size, mtime: stat.mtimeMs, label, favorite };
     })
     .sort((a, b) => b.mtime - a.mtime);
 });
@@ -667,6 +669,9 @@ ipcMain.handle("delete-session", async (_evt, filename) => {
   // Also remove label sidecar if present.
   const labelFile = path.join(dir, safeFilename.replace(/\.txt$/, ".label.txt"));
   if (fs.existsSync(labelFile)) fs.unlinkSync(labelFile);
+  // Also remove favorite sidecar if present.
+  const favFile = path.join(dir, safeFilename.replace(/\.txt$/, ".fav"));
+  if (fs.existsSync(favFile)) fs.unlinkSync(favFile);
   return { ok: true };
 });
 
@@ -684,6 +689,21 @@ ipcMain.handle("rename-session", async (_evt, filename, label) => {
     fs.unlinkSync(labelFile);
   }
   return { ok: true };
+});
+
+ipcMain.handle("toggle-favorite", async (_evt, filename) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { ok: false, error: "Invalid filename" };
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const favFile = path.join(dir, safeFilename.replace(/\.txt$/, ".fav"));
+  if (fs.existsSync(favFile)) {
+    fs.unlinkSync(favFile);
+    return { ok: true, favorite: false };
+  } else {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(favFile, "", "utf8");
+    return { ok: true, favorite: true };
+  }
 });
 
 ipcMain.handle("load-session", async (_evt, filename) => {
