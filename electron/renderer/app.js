@@ -538,7 +538,7 @@ async function start() {
     state.nextId = 1;
     els.log.innerHTML = "";
     window.api.clearLines?.();
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const stamp = formatSessionStamp(new Date());
     _currentSessionFile = `session_${stamp}.txt`;
   }
   toggleDownload();
@@ -1179,7 +1179,7 @@ function fmtTs(ms) {
 // -------- save --------
 
 function buildTranscriptText() {
-  const header = `Транскрипция встречи — ${new Date().toLocaleString("ru-RU")}\n\n`;
+  const header = `Транскрипция встречи — ${formatNovosibirskDateTime(new Date())}\n\n`;
   const ordered = [...state.messages]
     .filter((m) => m.text.trim().length > 0)
     .sort((a, b) => a.tsMs - b.tsMs);
@@ -1248,9 +1248,9 @@ async function refreshHistoryList() {
     const datePart = s.filename.replace(/^session_/, "").replace(/\.txt$/, "");
     // datePart: 2026-07-28T12-30-45 → 28.07.2026 12:30:45
     const dateLabel = formatSessionDate(datePart);
-    // Global position in full (unfiltered) list for default name "Запись N"
-    const globalIndex = sessions.indexOf(s) + 1;
-    const defaultName = `Запись ${globalIndex}`;
+    // Oldest record should be "Запись 1", newest should get the largest index.
+    const chronologicalIndex = sessions.length - sessions.indexOf(s);
+    const defaultName = `Запись ${chronologicalIndex}`;
     const displayLabel = s.label ? escapeHtml(s.label) : defaultName;
     const kb = Math.round(s.size / 1024 * 10) / 10;
     const starLabel = s.favorite ? "★" : "☆";
@@ -1377,6 +1377,33 @@ function formatSessionDate(datePart) {
     return `${parts[2]}.${parts[1]}.${parts[0]}`;
   }
   return datePart;
+}
+
+function formatNovosibirskDateTime(date) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Asia/Novosibirsk",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
+}
+
+function formatSessionStamp(date) {
+  const parts = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Novosibirsk",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const map = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${map.year}-${map.month}-${map.day}-${map.hour}-${map.minute}-${map.second}`;
 }
 
 function escapeHtml(str) {
