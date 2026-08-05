@@ -1107,6 +1107,13 @@ function typewriterSet(msgId, fullText) {
     s = { target: fullText, displayed: "", timer: null };
     _typewriterState.set(msgId, s);
   } else {
+    if (fullText.startsWith(s.displayed)) {
+      s.displayed = fullText.slice(0, s.displayed.length);
+    } else if (fullText.startsWith(s.target)) {
+      s.displayed = s.target;
+    } else {
+      s.displayed = "";
+    }
     s.target = fullText;
   }
   if (!s.timer) _typewriterTick(msgId);
