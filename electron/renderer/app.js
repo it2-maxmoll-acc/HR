@@ -9,6 +9,7 @@ const MERGE_TOLERANCE_MS = 5000;
 const MERGE_GAP_MS = CHUNK_MS + MERGE_TOLERANCE_MS;
 // Detect and remove up to this many repeated boundary words from overlap.
 const MAX_OVERLAP_WORDS = 8;
+const MIN_APPEND_OVERLAP_WORDS = 2;
 
 const els = {
   status: document.getElementById("status"),
@@ -1065,6 +1066,9 @@ function mergeChunkText(currentText, nextText) {
   if (!current) return incoming;
   if (!incoming) return current;
 
+  if (incoming.startsWith(current)) return incoming;
+  if (current.startsWith(incoming)) return current;
+
   const currentWords = current.split(/\s+/);
   const incomingWords = incoming.split(/\s+/);
   const normalizedCurrent = currentWords.map(normalizeWord);
@@ -1081,11 +1085,17 @@ function mergeChunkText(currentText, nextText) {
     }
   }
 
+  if (overlap < MIN_APPEND_OVERLAP_WORDS) {
+    const suffixOverlap = findBestSuffixOverlap(current, incoming);
+    if (suffixOverlap > 0) {
+      return current + incoming.slice(suffixOverlap);
+    }
+    return joinTranscriptParts(current, incoming);
+  }
+
   const incomingTail = incomingWords.slice(overlap).join(" ");
   if (!incomingTail) return current;
-  // If current already ends with whitespace or "-", don't add an extra separator.
-  const spacer = /[\s-]$/.test(current) ? "" : " ";
-  return current + spacer + incomingTail;
+  return joinTranscriptParts(current, incomingTail);
 }
 
 function normalizeWord(word) {
@@ -1094,6 +1104,33 @@ function normalizeWord(word) {
     .toLowerCase()
     .replace(/^[^\p{L}\p{N}]+/gu, "")
     .replace(/[^\p{L}\p{N}]+$/gu, "");
+}
+
+function findBestSuffixOverlap(currentText, nextText) {
+  const maxLen = Math.min(currentText.length, nextText.length, 80);
+  for (let size = maxLen; size >= 6; size--) {
+    const currentTail = currentText.slice(-size);
+    const incomingHead = nextText.slice(0, size);
+    if (normalizeSpan(currentTail) === normalizeSpan(incomingHead)) {
+      return size;
+    }
+  }
+  return 0;
+}
+
+function normalizeSpan(text) {
+  return text
+    .toLowerCase()
+    .replace(/[ё]/g, "е")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function joinTranscriptParts(current, addition) {
+  if (!addition) return current;
+  const spacer = /[\s-]$/.test(current) || /^[,.;:!?)]/.test(addition) ? "" : " ";
+  return current + spacer + addition;
 }
 
 // -------- typewriter engine --------
@@ -1107,16 +1144,18 @@ function typewriterSet(msgId, fullText) {
     s = { target: fullText, displayed: "", timer: null };
     _typewriterState.set(msgId, s);
   } else {
-    if (fullText.startsWith(s.displayed)) {
-      s.displayed = fullText.slice(0, s.displayed.length);
-    } else if (fullText.startsWith(s.target)) {
-      s.displayed = s.target;
-    } else {
-      s.displayed = "";
-    }
+    const stablePrefix = longestCommonPrefix(s.displayed, fullText);
+    s.displayed = fullText.slice(0, stablePrefix);
     s.target = fullText;
   }
   if (!s.timer) _typewriterTick(msgId);
+}
+
+function longestCommonPrefix(a, b) {
+  const maxLen = Math.min(a.length, b.length);
+  let idx = 0;
+  while (idx < maxLen && a[idx] === b[idx]) idx++;
+  return idx;
 }
 
 function _typewriterTick(msgId) {
