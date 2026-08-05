@@ -1,7 +1,7 @@
 // Realtime Transcriber — renderer
 
-const CHUNK_MS = 1500; // window length (shorter = lower latency)
-const OVERLAP_MS = 300; // overlap between chunks so words aren't cut
+const CHUNK_MS = 4000; // window length — longer chunks give the model a full phrase
+const OVERLAP_MS = 500; // overlap between chunks so words aren't cut
 const SAMPLE_RATE = 16000;
 // Allow several delayed chunks or network jitter before starting a new phrase line.
 const MERGE_TOLERANCE_MS = 5000;
@@ -66,6 +66,7 @@ const state = {
   messages: [], // { role, tsMs, lastTsMs, text, id }
   nextId: 1,
   historyTab: "all", // "all" | "favorites"
+  prevText: {}, // { [role]: last ~100 chars of transcribed text for context prompt }
 };
 
 // Current session file for autosave (set on start, cleared on stop).
@@ -82,7 +83,7 @@ els.apiKey.addEventListener("change", () =>
   window.api.storeApiKey?.(els.apiKey.value.trim()),
 );
 
-const savedModel = localStorage.getItem("openai-model") || "whisper-1";
+const savedModel = localStorage.getItem("openai-model") || "gpt-4o-transcribe";
 els.modelSelect.value = savedModel;
 els.modelSelect.addEventListener("change", () =>
   localStorage.setItem("openai-model", els.modelSelect.value),
@@ -647,6 +648,7 @@ async function stop() {
     }
   }
   state.captures = [];
+  state.prevText = {};
 
   els.start.disabled = false;
   els.stop.disabled = true;
@@ -836,13 +838,14 @@ const HALLUCINATION_PHRASES = new Set([
   "ну",
 ]);
 
-// Fragments of the Whisper prompt that the model sometimes echoes back verbatim.
+// Fragments of the prompt that the model sometimes echoes back verbatim.
 const PROMPT_FRAGMENTS = [
-  "числа пиши арабскими цифрами",
-  "знаки препинания расставляй точно",
-  "пиши каждое слово отдельно",
+  "разговорная речь на русском",
+  "транскрибируй дословно",
+  "без добавлений и повторений",
+  "не заканчивай незавершённые мысли",
+  "числа пиши цифрами",
   "не используй многоточие",
-  "не повторяй слова и фразы",
 ];
 
 function isLikelyHallucination(text) {
@@ -947,10 +950,15 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     form.append("file", wavBlob, `chunk_${chunkIndex}.wav`);
     form.append("model", model);
     form.append("language", "ru");
-    form.append(
-      "prompt",
-      "Числа пиши арабскими цифрами. Знаки препинания расставляй точно. Пиши каждое слово отдельно. Не используй многоточие. Не повторяй слова и фразы.",
-    );
+    // Base instruction prompt — describes the recording situation so the model
+    // transcribes verbatim without hallucinating completions or repeating words.
+    const basePrompt =
+      "Это разговорная речь на русском языке. Транскрибируй дословно, без добавлений и повторений. Не заканчивай незавершённые мысли. Числа пиши цифрами. Не используй многоточие.";
+    // Append the tail of the previous chunk so the model understands context
+    // and doesn't capitalise mid-sentence or duplicate boundary words.
+    const prev = (state.prevText[role] || "").slice(-120);
+    const prompt = prev ? `${basePrompt} Предыдущий фрагмент: «${prev}»` : basePrompt;
+    form.append("prompt", prompt);
 
     let res, data;
     try {
@@ -1012,6 +1020,8 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     // Strip excessive ellipsis sequences the model sometimes produces.
     const text = rawText.replace(/\.{2,}/g, "").replace(/\s{2,}/g, " ").trim();
     if (text && !isLikelyHallucination(rawText) && hasEnoughCyrillic(text)) {
+      // Remember tail for next chunk's context prompt.
+      state.prevText[role] = text;
       addOrMergeMessage(role, tsMs, text, chunkIndex);
     }
     return;
