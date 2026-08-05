@@ -535,8 +535,6 @@ async function start() {
     state.startedAt = performance.now();
     state.messages = [];
     state.nextId = 1;
-    _typewriterState.forEach((s) => { if (s.timer) clearTimeout(s.timer); });
-    _typewriterState.clear();
     els.log.innerHTML = "";
     window.api.clearLines?.();
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
@@ -1133,70 +1131,6 @@ function joinTranscriptParts(current, addition) {
   return current + spacer + addition;
 }
 
-// -------- typewriter engine --------
-// Per-message state: { target: string, displayed: string, timer: id | null }
-const _typewriterState = new Map(); // msgId → { target, displayed, timer }
-const TYPEWRITER_CHAR_MS = 18; // ms per character (~55 chars/s)
-
-function typewriterSet(msgId, fullText) {
-  let s = _typewriterState.get(msgId);
-  if (!s) {
-    s = { target: fullText, displayed: "", timer: null };
-    _typewriterState.set(msgId, s);
-  } else {
-    const stablePrefix = longestCommonPrefix(s.displayed, fullText);
-    s.displayed = fullText.slice(0, stablePrefix);
-    s.target = fullText;
-  }
-  if (!s.timer) _typewriterTick(msgId);
-}
-
-function longestCommonPrefix(a, b) {
-  const maxLen = Math.min(a.length, b.length);
-  let idx = 0;
-  while (idx < maxLen && a[idx] === b[idx]) idx++;
-  return idx;
-}
-
-function _typewriterTick(msgId) {
-  const s = _typewriterState.get(msgId);
-  if (!s) return;
-  if (s.displayed.length >= s.target.length) {
-    // Done — ensure final text is shown, remove cursor
-    s.timer = null;
-    _typewriterFlush(msgId);
-    return;
-  }
-  // Advance by one character
-  s.displayed = s.target.slice(0, s.displayed.length + 1);
-  _typewriterFlush(msgId);
-  s.timer = setTimeout(() => _typewriterTick(msgId), TYPEWRITER_CHAR_MS);
-}
-
-function _typewriterFlush(msgId) {
-  const s = _typewriterState.get(msgId);
-  if (!s) return;
-  const node = els.log.querySelector(`[data-id="${msgId}"]`);
-  if (!node) return;
-  const t = node.querySelector(".text");
-  const isTyping = s.displayed.length < s.target.length;
-  // Show displayed text + blinking cursor while still typing
-  t.textContent = s.displayed;
-  if (isTyping) {
-    node.classList.add("typing");
-  } else {
-    node.classList.remove("typing");
-    _typewriterState.delete(msgId);
-  }
-  els.log.scrollTop = els.log.scrollHeight;
-}
-
-function typewriterClear(msgId) {
-  const s = _typewriterState.get(msgId);
-  if (s?.timer) clearTimeout(s.timer);
-  _typewriterState.delete(msgId);
-}
-
 function renderMessage(msg) {
   const node = document.createElement("div");
   node.className = "msg";
@@ -1205,21 +1139,22 @@ function renderMessage(msg) {
     `<span class="badge ${msg.role === "HR" ? "hr" : "cand"}">${msg.role}</span>` +
     `<span class="ts">[${fmtTs(msg.tsMs)}]</span>` +
     `<span class="text"></span>`;
+  node.querySelector(".text").textContent = msg.text;
   els.log.appendChild(node);
   els.log.scrollTop = els.log.scrollHeight;
   toggleDownload();
-  typewriterSet(msg.id, msg.text);
 }
 
 function updateMessage(msg) {
   const node = els.log.querySelector(`[data-id="${msg.id}"]`);
   if (!node) return;
-  typewriterSet(msg.id, msg.text);
+  node.querySelector(".text").textContent = msg.text;
+  node.classList.remove("typing");
+  els.log.scrollTop = els.log.scrollHeight;
   toggleDownload();
 }
 
 function removeMessage(id) {
-  typewriterClear(id);
   const node = els.log.querySelector(`[data-id="${id}"]`);
   node?.remove();
   toggleDownload();
