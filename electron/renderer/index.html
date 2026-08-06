@@ -24,7 +24,9 @@
         <span>Микрофон (HR)</span>
         <div class="mic-row">
           <select id="mic-select"></select>
-          <button id="mic-test" class="btn ghost small" type="button" title="Проверить микрофон">🎙 Тест</button>
+          <button id="mic-test" class="btn ghost small" type="button" title="Проверить микрофон">
+            🎙 Тест
+          </button>
         </div>
         <div id="mic-meter-wrap" class="mic-meter-wrap hidden">
           <div id="mic-meter-bar" class="mic-meter-bar"></div>
@@ -32,21 +34,14 @@
         </div>
       </label>
       <label>
-        <span>Системный звук (Кандидат)</span>
+        <span>Кандидат (звук из Windows / loopback)</span>
         <select id="sys-select">
-          <option value="loopback">Системный звук (весь ПК)</option>
+          <option value="loopback">Звук из Windows (loopback, всё что воспроизводит ПК)</option>
         </select>
       </label>
       <label>
         <span>Чувствительность к тишине: <b id="sens-value">3</b> / 5</span>
-        <input
-          id="sensitivity"
-          type="range"
-          min="1"
-          max="5"
-          step="1"
-          value="3"
-        />
+        <input id="sensitivity" type="range" min="1" max="5" step="1" value="3" />
       </label>
       <label class="endpoint" id="api-key-row">
         <span>OpenAI API Key</span>
@@ -73,8 +68,11 @@
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
         <span id="proxy-status-text" class="proxy-status-text">загрузка…</span>
-        <label class="proxy-auto-label hidden" id="proxy-auto-fallback-row"
-          title="Если прокси не работает — автоматически переключиться на прямое подключение. Включите при использовании системного VPN (WireGuard, OpenVPN и др.)">
+        <label
+          class="proxy-auto-label hidden"
+          id="proxy-auto-fallback-row"
+          title="Если прокси не работает — автоматически переключиться на прямое подключение. Включите при использовании системного VPN (WireGuard, OpenVPN и др.)"
+        >
           <input type="checkbox" id="proxy-auto-fallback" />
           <span class="proxy-auto-text">Авто (VPN)</span>
         </label>
@@ -94,9 +92,7 @@
 
     <div class="log-header">
       <span>Расшифровка</span>
-      <button id="download" class="btn download" disabled>
-        ⬇ Скачать .txt
-      </button>
+      <button id="download" class="btn download" disabled>⬇ Скачать .txt</button>
     </div>
 
     <main id="log" class="log" aria-live="polite"></main>
@@ -126,7 +122,7 @@
     <div id="logs-panel" class="history-panel hidden">
       <div class="history-header">
         <span>Системные логи</span>
-        <div style="display:flex;gap:8px">
+        <div style="display: flex; gap: 8px">
           <button id="logs-copy" class="btn ghost small">📋 Копировать</button>
           <button id="logs-clear" class="btn ghost small">🗑 Очистить</button>
           <button id="logs-close" class="btn ghost small">✕ Закрыть</button>
@@ -141,7 +137,13 @@
     <div id="rename-modal" class="rename-modal hidden">
       <div class="rename-modal-box">
         <p class="rename-modal-title">Название записи</p>
-        <input id="rename-input" class="rename-input" type="text" maxlength="200" placeholder="Введите название…" />
+        <input
+          id="rename-input"
+          class="rename-input"
+          type="text"
+          maxlength="200"
+          placeholder="Введите название…"
+        />
         <div class="rename-modal-actions">
           <button id="rename-cancel" class="btn ghost small">Отмена</button>
           <button id="rename-confirm" class="btn primary small">Сохранить</button>

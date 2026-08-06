@@ -53,6 +53,11 @@ function fmtTs(ms) {
 function upsertMessage(msg) {
   const existing = logEl.querySelector(`[data-id="${msg.id}"]`);
   if (existing) {
+    const badge = existing.querySelector(".badge");
+    const isHR = msg.role === "HR";
+    badge.textContent = msg.role;
+    badge.className = `badge ${isHR ? "hr" : "cand"}`;
+    existing.querySelector(".ts").textContent = `[${fmtTs(msg.tsMs)}]`;
     existing.querySelector(".text").textContent = msg.text;
     logEl.scrollTop = logEl.scrollHeight;
     return;

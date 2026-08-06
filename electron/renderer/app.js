@@ -10,6 +10,10 @@ const MERGE_GAP_MS = CHUNK_MS + MERGE_TOLERANCE_MS;
 // Detect and remove up to this many repeated boundary words from overlap.
 const MAX_OVERLAP_WORDS = 8;
 const MIN_APPEND_OVERLAP_WORDS = 2;
+const CROSS_ROLE_DUP_WINDOW_MS = 8000;
+const CROSS_ROLE_DUP_MIN_CHARS = 16;
+const CROSS_ROLE_DUP_MIN_WORDS = 3;
+const CROSS_ROLE_PROMOTION_RATIO = 1.35;
 
 const els = {
   status: document.getElementById("status"),
@@ -79,9 +83,7 @@ let _autosaveInterval = null;
 window.api.loadApiKey?.().then((key) => {
   if (key) els.apiKey.value = key;
 });
-els.apiKey.addEventListener("change", () =>
-  window.api.storeApiKey?.(els.apiKey.value.trim()),
-);
+els.apiKey.addEventListener("change", () => window.api.storeApiKey?.(els.apiKey.value.trim()));
 
 const savedModel = localStorage.getItem("openai-model") || "gpt-4o-transcribe";
 els.modelSelect.value = savedModel;
@@ -116,6 +118,7 @@ async function refreshDevices() {
     const probe = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
     const devices = await navigator.mediaDevices.enumerateDevices();
     const mics = devices.filter((d) => d.kind === "audioinput");
+    const savedMic = localStorage.getItem("mic-source");
     els.mic.innerHTML = "";
     for (const m of mics) {
       const opt = document.createElement("option");
@@ -123,21 +126,35 @@ async function refreshDevices() {
       opt.textContent = m.label || `Микрофон ${m.deviceId.slice(0, 6)}`;
       els.mic.appendChild(opt);
     }
-    // System audio: keep loopback default, but also list any audioinput
-    // devices (useful when a virtual loopback cable is installed).
+    if (savedMic && mics.some((m) => m.deviceId === savedMic)) {
+      els.mic.value = savedMic;
+    }
+    // Candidate audio should come from Windows loopback or an explicit virtual
+    // loopback device. Offering every physical microphone here makes it easy to
+    // accidentally record HR twice under both roles.
     els.sys.innerHTML = "";
     const loop = document.createElement("option");
     loop.value = "loopback";
-    loop.textContent = "Системный звук (весь ПК)";
+    loop.textContent = "Звук из Windows (loopback, всё что воспроизводит ПК)";
     els.sys.appendChild(loop);
-    for (const m of mics) {
+    const loopbackInputs = mics.filter((m) => isLikelyLoopbackInput(m));
+    for (const m of loopbackInputs) {
       const opt = document.createElement("option");
       opt.value = "input:" + m.deviceId;
-      opt.textContent = "Вход: " + (m.label || `устройство ${m.deviceId.slice(0, 6)}`);
+      opt.textContent =
+        "Виртуальный loopback: " + (m.label || `устройство ${m.deviceId.slice(0, 6)}`);
       els.sys.appendChild(opt);
     }
     const savedSys = localStorage.getItem("sys-source");
-    if (savedSys) els.sys.value = savedSys;
+    const sysChoices = new Set(["loopback", ...loopbackInputs.map((m) => `input:${m.deviceId}`)]);
+    if (savedSys && sysChoices.has(savedSys)) {
+      els.sys.value = savedSys;
+    } else if (savedSys && savedSys !== "loopback") {
+      console.warn(
+        `[audio] Ignored saved candidate source "${savedSys}" because it is not a loopback/system-audio device.`,
+      );
+      localStorage.setItem("sys-source", "loopback");
+    }
     if (probe) probe.getTracks().forEach((t) => t.stop());
   } catch (e) {
     showBanner("Не удалось получить список микрофонов: " + e.message);
@@ -168,13 +185,17 @@ document.getElementById("history-panel").addEventListener("click", (e) => {
   const tabName = tab.dataset.tab;
   if (tabName === state.historyTab) return;
   state.historyTab = tabName;
-  document.querySelectorAll(".history-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tabName));
+  document
+    .querySelectorAll(".history-tab")
+    .forEach((t) => t.classList.toggle("active", t.dataset.tab === tabName));
   refreshHistoryList();
 });
 
 // Rename modal
 els.renameCancel.addEventListener("click", closeRenameModal);
-els.renameModal.addEventListener("click", (e) => { if (e.target === els.renameModal) closeRenameModal(); });
+els.renameModal.addEventListener("click", (e) => {
+  if (e.target === els.renameModal) closeRenameModal();
+});
 els.renameInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") els.renameConfirm.click();
   if (e.key === "Escape") closeRenameModal();
@@ -236,9 +257,18 @@ async function startMicTest() {
 
 function stopMicTest() {
   _micTestActive = false;
-  if (_micTestRaf) { cancelAnimationFrame(_micTestRaf); _micTestRaf = null; }
-  if (_micTestStream) { _micTestStream.getTracks().forEach((t) => t.stop()); _micTestStream = null; }
-  if (_micTestCtx) { _micTestCtx.close().catch(() => {}); _micTestCtx = null; }
+  if (_micTestRaf) {
+    cancelAnimationFrame(_micTestRaf);
+    _micTestRaf = null;
+  }
+  if (_micTestStream) {
+    _micTestStream.getTracks().forEach((t) => t.stop());
+    _micTestStream = null;
+  }
+  if (_micTestCtx) {
+    _micTestCtx.close().catch(() => {});
+    _micTestCtx = null;
+  }
   _micTestAnalyser = null;
   els.micMeterWrap.classList.add("hidden");
   els.micMeterBar.style.width = "0%";
@@ -271,7 +301,11 @@ const _logs = [];
         .map((a) => {
           if (a instanceof Error) return a.stack || String(a);
           if (typeof a === "object") {
-            try { return JSON.stringify(a, null, 2); } catch { return String(a); }
+            try {
+              return JSON.stringify(a, null, 2);
+            } catch {
+              return String(a);
+            }
           }
           return String(a);
         })
@@ -395,12 +429,15 @@ function logProxyDiagnostics(diag) {
   }
 }
 
-window.api.getProxyDiagnostics?.().then((diag) => {
-  logProxyDiagnostics(diag);
-  initProxyToggle(diag);
-}).catch((e) => {
-  console.error("[proxy] failed to load diagnostics", e?.message || e);
-});
+window.api
+  .getProxyDiagnostics?.()
+  .then((diag) => {
+    logProxyDiagnostics(diag);
+    initProxyToggle(diag);
+  })
+  .catch((e) => {
+    console.error("[proxy] failed to load diagnostics", e?.message || e);
+  });
 
 function initProxyToggle(diag) {
   if (!els.proxyEnabled || !els.proxyStatusText) return;
@@ -490,7 +527,6 @@ window.api.onNetError?.((msg) => {
   }
 });
 
-
 window.api.onRecordingControl?.((action) => {
   if (action === "start") start().catch(handleFatal);
   else if (action === "stop") stop().catch(handleFatal);
@@ -553,18 +589,21 @@ async function start() {
 
   // Mic
   const micDeviceId = els.mic.value;
+  const micLabel = els.mic.selectedOptions[0]?.textContent || micDeviceId || "default";
+  const sysChoice = els.sys.value || "loopback";
+  const sysLabel = els.sys.selectedOptions[0]?.textContent || sysChoice;
+  console.log(`[audio] start capture hrMic="${micLabel}" candidateSource="${sysLabel}"`);
   const micStream = await navigator.mediaDevices.getUserMedia({
     audio: {
       deviceId: micDeviceId ? { exact: micDeviceId } : undefined,
       echoCancellation: true,
       noiseSuppression: true,
-      autoGainControl: true,
+      autoGainControl: false,
     },
   });
 
   // System audio via getDisplayMedia (Electron 30+ with setDisplayMediaRequestHandler)
   let sysStream = null;
-  const sysChoice = els.sys.value || "loopback";
   try {
     if (sysChoice.startsWith("input:")) {
       const deviceId = sysChoice.slice("input:".length);
@@ -637,7 +676,7 @@ async function stop() {
       // Send remaining buffer as a final chunk.
       if (cap.buffer.length > 0) {
         const audio = flushBuffer(cap);
-        sendChunk(cap.role, audio, cap.startTs, cap.chunkIndex++);
+        sendChunk(cap.role, audio.wav, cap.startTs, cap.chunkIndex++, audio.rms);
       }
       cap.processor.disconnect();
       cap.source.disconnect();
@@ -745,7 +784,8 @@ async function startCapture(role, stream) {
       // Silence gate: skip near-silent chunks so the model doesn't hallucinate.
       if (!isSilent(chunk)) {
         const wav = encodeWav(chunk, audioCtx.sampleRate);
-        sendChunk(cap.role, wav, tsAtStart, idx);
+        const stats = analyzeSamples(chunk);
+        sendChunk(cap.role, wav, tsAtStart, idx, stats.rms);
       }
 
       // Keep overlap tail as head of next buffer.
@@ -774,7 +814,10 @@ function flushBuffer(cap) {
   cap.buffer = [];
   cap.bufferSamples = 0;
   cap.startTs = cap.windowStartTs;
-  return encodeWav(merged, cap.audioCtx.sampleRate);
+  return {
+    wav: encodeWav(merged, cap.audioCtx.sampleRate),
+    rms: analyzeSamples(merged).rms,
+  };
 }
 
 // Return true if the chunk is quiet enough that we treat it as silence.
@@ -782,6 +825,11 @@ function flushBuffer(cap) {
 // Clicks or fan noise can push peak up while the chunk is really silent,
 // so we require a meaningful fraction of samples to be non-trivial.
 function isSilent(samples) {
+  const stats = analyzeSamples(samples);
+  return stats.isSilent;
+}
+
+function analyzeSamples(samples) {
   let sumSq = 0;
   let peak = 0;
   let voiced = 0;
@@ -796,10 +844,9 @@ function isSilent(samples) {
   const rms = Math.sqrt(sumSq / samples.length);
   const voicedRatio = voiced / samples.length;
   // Thresholds come from the user-selected sensitivity profile.
-  if (rms < silenceProfile.rms) return true;
-  if (peak < silenceProfile.peak) return true;
-  if (voicedRatio < silenceProfile.voiced) return true;
-  return false;
+  const isQuiet =
+    rms < silenceProfile.rms || peak < silenceProfile.peak || voicedRatio < silenceProfile.voiced;
+  return { rms, peak, voicedRatio, isSilent: isQuiet };
 }
 
 // Short outputs the model tends to hallucinate on silence / room noise.
@@ -926,7 +973,7 @@ function _sleep(ms) {
 
 // -------- send + render --------
 
-async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
+async function sendChunk(role, wavBlob, tsMs, chunkIndex, audioLevel = 0) {
   const model = els.modelSelect.value || "whisper-1";
   const apiKey = (els.apiKey.value || "").trim();
   if (!apiKey) {
@@ -998,9 +1045,10 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     if (!res.ok) {
       const rawErr = data?.error;
       const errMsg =
-        (rawErr && typeof rawErr === "object" ? rawErr.message : rawErr) ||
-        `HTTP ${res.status}`;
-      console.error(`[sendChunk] error status=${res.status} msg="${errMsg}" data=${JSON.stringify(data)}`);
+        (rawErr && typeof rawErr === "object" ? rawErr.message : rawErr) || `HTTP ${res.status}`;
+      console.error(
+        `[sendChunk] error status=${res.status} msg="${errMsg}" data=${JSON.stringify(data)}`,
+      );
       // Transient server error — retry a few times before giving up.
       if (res.status >= 500 && attempt < 5) {
         attempt++;
@@ -1009,7 +1057,7 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
         await _sleep(delay);
         continue;
       }
-      addMessage(role, tsMs, `[ошибка: ${errMsg}]`, chunkIndex);
+      addMessage(role, tsMs, `[ошибка: ${errMsg}]`, chunkIndex, audioLevel);
       return;
     }
 
@@ -1018,17 +1066,20 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex) {
     console.log(`[sendChunk] ok role=${role} chunkIndex=${chunkIndex}`);
     const rawText = (data.text || "").trim();
     // Strip excessive ellipsis sequences the model sometimes produces.
-    const text = rawText.replace(/\.{2,}/g, "").replace(/\s{2,}/g, " ").trim();
+    const text = rawText
+      .replace(/\.{2,}/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
     if (text && !isLikelyHallucination(rawText) && hasEnoughCyrillic(text)) {
       // Remember tail for next chunk's context prompt.
       state.prevText[role] = text;
-      addOrMergeMessage(role, tsMs, text, chunkIndex);
+      addOrMergeMessage(role, tsMs, text, chunkIndex, audioLevel);
     }
     return;
   }
 }
 
-function addMessage(role, tsMs, text, chunkIndex) {
+function addMessage(role, tsMs, text, chunkIndex, audioLevel = 0) {
   const msg = {
     id: state.nextId++,
     role,
@@ -1036,18 +1087,24 @@ function addMessage(role, tsMs, text, chunkIndex) {
     lastTsMs: tsMs,
     text,
     chunkIndex,
+    audioLevel,
   };
   state.messages.push(msg);
   renderMessage(msg);
   window.api.pushTranscriptLine?.({ id: msg.id, role: msg.role, tsMs: msg.tsMs, text: msg.text });
 }
 
-function addOrMergeMessage(role, tsMs, text, chunkIndex) {
+function addOrMergeMessage(role, tsMs, text, chunkIndex, audioLevel = 0) {
+  const dedupeResult = resolveCrossRoleDuplicate(role, tsMs, text, chunkIndex, audioLevel);
+  if (dedupeResult?.handled) {
+    return;
+  }
   const last = state.messages[state.messages.length - 1];
   if (canMergeWithLast(last, role, tsMs)) {
     last.text = mergeChunkText(last.text, text);
     last.lastTsMs = tsMs;
     last.chunkIndex = chunkIndex;
+    last.audioLevel = Math.max(last.audioLevel || 0, audioLevel);
     updateMessage(last);
     window.api.pushTranscriptLine?.({
       id: last.id,
@@ -1057,7 +1114,7 @@ function addOrMergeMessage(role, tsMs, text, chunkIndex) {
     });
     return;
   }
-  addMessage(role, tsMs, text, chunkIndex);
+  addMessage(role, tsMs, text, chunkIndex, audioLevel);
 }
 
 function canMergeWithLast(last, role, tsMs) {
@@ -1141,6 +1198,100 @@ function joinTranscriptParts(current, addition) {
   return current + spacer + addition;
 }
 
+function resolveCrossRoleDuplicate(role, tsMs, text, chunkIndex, audioLevel) {
+  const duplicate = findCrossRoleDuplicate(role, tsMs, text);
+  if (!duplicate) return { handled: false };
+
+  const existingLevel = duplicate.audioLevel || 0;
+  const canPromote =
+    audioLevel > 0 &&
+    (existingLevel <= 0 || audioLevel >= existingLevel * CROSS_ROLE_PROMOTION_RATIO);
+
+  if (canPromote) {
+    duplicate.role = role;
+    duplicate.text = pickRicherTranscript(duplicate.text, text);
+    duplicate.tsMs = tsMs;
+    duplicate.lastTsMs = tsMs;
+    duplicate.chunkIndex = chunkIndex;
+    duplicate.audioLevel = audioLevel;
+    console.warn(
+      `[audio] Reassigned duplicate transcript to ${role}; stronger signal ${audioLevel.toFixed(4)} vs ${existingLevel.toFixed(4)}`,
+    );
+    updateMessage(duplicate);
+    window.api.pushTranscriptLine?.({
+      id: duplicate.id,
+      role: duplicate.role,
+      tsMs: duplicate.tsMs,
+      text: duplicate.text,
+    });
+    return { handled: true };
+  }
+
+  console.warn(
+    `[audio] Dropped duplicate transcript for ${role}; matched recent ${duplicate.role} line with signal ${existingLevel.toFixed(4)} vs ${audioLevel.toFixed(4)}`,
+  );
+  return { handled: true };
+}
+
+function findCrossRoleDuplicate(role, tsMs, text) {
+  if (!isEligibleForCrossRoleDedup(text)) return null;
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const msg = state.messages[i];
+    if (msg.role === role) continue;
+    if (msg.text.startsWith("[")) continue;
+    if (Math.abs((msg.lastTsMs ?? msg.tsMs) - tsMs) > CROSS_ROLE_DUP_WINDOW_MS) continue;
+    if (areLikelySameUtterance(msg.text, text)) return msg;
+  }
+  return null;
+}
+
+function isEligibleForCrossRoleDedup(text) {
+  const normalized = normalizeSpan(text);
+  if (normalized.length < CROSS_ROLE_DUP_MIN_CHARS) return false;
+  return normalized.split(" ").filter(Boolean).length >= CROSS_ROLE_DUP_MIN_WORDS;
+}
+
+function areLikelySameUtterance(a, b) {
+  const left = normalizeSpan(a);
+  const right = normalizeSpan(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  if (
+    (left.includes(right) || right.includes(left)) &&
+    Math.min(left.length, right.length) >= CROSS_ROLE_DUP_MIN_CHARS
+  ) {
+    return true;
+  }
+
+  const leftWords = left.split(" ").filter(Boolean);
+  const rightWords = right.split(" ").filter(Boolean);
+  const shared = countSharedWords(leftWords, rightWords);
+  if (shared < CROSS_ROLE_DUP_MIN_WORDS) return false;
+  return shared / Math.min(leftWords.length, rightWords.length) >= 0.8;
+}
+
+function countSharedWords(leftWords, rightWords) {
+  const rightCounts = new Map();
+  for (const word of rightWords) {
+    rightCounts.set(word, (rightCounts.get(word) || 0) + 1);
+  }
+  let shared = 0;
+  for (const word of leftWords) {
+    const count = rightCounts.get(word) || 0;
+    if (count <= 0) continue;
+    shared++;
+    rightCounts.set(word, count - 1);
+  }
+  return shared;
+}
+
+function pickRicherTranscript(existingText, nextText) {
+  if (!existingText) return nextText;
+  if (!nextText) return existingText;
+  if (existingText.length === nextText.length) return nextText;
+  return existingText.length > nextText.length ? existingText : nextText;
+}
+
 function renderMessage(msg) {
   const node = document.createElement("div");
   node.className = "msg";
@@ -1158,6 +1309,10 @@ function renderMessage(msg) {
 function updateMessage(msg) {
   const node = els.log.querySelector(`[data-id="${msg.id}"]`);
   if (!node) return;
+  const badge = node.querySelector(".badge");
+  badge.textContent = msg.role;
+  badge.className = `badge ${msg.role === "HR" ? "hr" : "cand"}`;
+  node.querySelector(".ts").textContent = `[${fmtTs(msg.tsMs)}]`;
   node.querySelector(".text").textContent = msg.text;
   node.classList.remove("typing");
   els.log.scrollTop = els.log.scrollHeight;
@@ -1229,14 +1384,13 @@ async function refreshHistoryList() {
     return;
   }
 
-  const filtered = state.historyTab === "favorites"
-    ? sessions.filter(s => s.favorite)
-    : sessions;
+  const filtered = state.historyTab === "favorites" ? sessions.filter((s) => s.favorite) : sessions;
 
   if (filtered.length === 0) {
-    els.historyList.innerHTML = state.historyTab === "favorites"
-      ? '<p class="history-loading">Нет избранных записей.</p>'
-      : '<p class="history-loading">Сохранённых записей нет.</p>';
+    els.historyList.innerHTML =
+      state.historyTab === "favorites"
+        ? '<p class="history-loading">Нет избранных записей.</p>'
+        : '<p class="history-loading">Сохранённых записей нет.</p>';
     return;
   }
   els.historyList.innerHTML = "";
@@ -1252,24 +1406,24 @@ async function refreshHistoryList() {
     const chronologicalIndex = sessions.length - sessions.indexOf(s);
     const defaultName = `Запись ${chronologicalIndex}`;
     const displayLabel = s.label ? escapeHtml(s.label) : defaultName;
-    const kb = Math.round(s.size / 1024 * 10) / 10;
+    const kb = Math.round((s.size / 1024) * 10) / 10;
     const starLabel = s.favorite ? "★" : "☆";
     const starClass = s.favorite ? "history-star active" : "history-star";
 
     row.innerHTML =
       `<div class="history-info">` +
-        `<div class="history-info-text">` +
-          `<span class="history-name" title="${dateLabel}">${displayLabel}</span>` +
-          `<span class="history-date">${dateLabel}</span>` +
-        `</div>` +
-        `<span class="history-size">${kb} КБ</span>` +
+      `<div class="history-info-text">` +
+      `<span class="history-name" title="${dateLabel}">${displayLabel}</span>` +
+      `<span class="history-date">${dateLabel}</span>` +
+      `</div>` +
+      `<span class="history-size">${kb} КБ</span>` +
       `</div>` +
       `<div class="history-actions">` +
-        `<button class="${starClass}" data-action="favorite" data-file="${s.filename}" title="Добавить в избранное">${starLabel}</button>` +
-        `<button class="btn ghost history-btn" data-action="rename" data-file="${s.filename}" data-label="${escapeHtml(s.label || "")}" data-default="${escapeHtml(defaultName)}">✏</button>` +
-        `<button class="btn ghost history-btn" data-action="view" data-file="${s.filename}">Открыть</button>` +
-        `<button class="btn primary history-btn" data-action="continue" data-file="${s.filename}">Продолжить</button>` +
-        `<button class="btn danger history-btn" data-action="delete" data-file="${s.filename}">Удалить</button>` +
+      `<button class="${starClass}" data-action="favorite" data-file="${s.filename}" title="Добавить в избранное">${starLabel}</button>` +
+      `<button class="btn ghost history-btn" data-action="rename" data-file="${s.filename}" data-label="${escapeHtml(s.label || "")}" data-default="${escapeHtml(defaultName)}">✏</button>` +
+      `<button class="btn ghost history-btn" data-action="view" data-file="${s.filename}">Открыть</button>` +
+      `<button class="btn primary history-btn" data-action="continue" data-file="${s.filename}">Продолжить</button>` +
+      `<button class="btn danger history-btn" data-action="delete" data-file="${s.filename}">Удалить</button>` +
       `</div>`;
     els.historyList.appendChild(row);
   }
@@ -1300,7 +1454,10 @@ async function onHistoryAction(e) {
   }
 
   if (action === "delete") {
-    if (!confirm(`Удалить запись «${formatSessionDate(filename.replace(/^session_|\.txt$/g, ""))}»?`)) return;
+    if (
+      !confirm(`Удалить запись «${formatSessionDate(filename.replace(/^session_|\.txt$/g, ""))}»?`)
+    )
+      return;
     try {
       await window.api.deleteSession(filename);
       await refreshHistoryList();
@@ -1343,7 +1500,11 @@ async function onHistoryAction(e) {
     state.startedAt = performance.now() - maxTs - 2000;
     _currentSessionFile = filename;
     closeHistoryPanel();
-    showBanner("Продолжение записи «" + formatSessionDate(filename.replace(/^session_|\.txt$/g, "")) + "». Нажмите «Начать запись».");
+    showBanner(
+      "Продолжение записи «" +
+        formatSessionDate(filename.replace(/^session_|\.txt$/g, "")) +
+        "». Нажмите «Начать запись».",
+    );
   }
 }
 
@@ -1402,8 +1563,34 @@ function formatSessionStamp(date) {
     second: "2-digit",
     hourCycle: "h23",
   }).formatToParts(date);
-  const map = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  const map = Object.fromEntries(
+    parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]),
+  );
   return `${map.year}-${map.month}-${map.day}-${map.hour}-${map.minute}-${map.second}`;
+}
+
+function isLikelyLoopbackInput(device) {
+  const label = String(device?.label || "").toLowerCase();
+  if (!label) return false;
+  const include = [
+    "loopback",
+    "stereo mix",
+    "what u hear",
+    "monitor",
+    "vb-audio",
+    "cable output",
+    "cable-a output",
+    "voicemeeter",
+    "blackhole",
+    "soundflower",
+    "virtual",
+    "вирту",
+  ];
+  const exclude = ["microphone", "mic", "микроф", "гарнит", "headset", "webcam", "line in"];
+  const explicitLoopback = include.some((token) => label.includes(token));
+  if (explicitLoopback) return true;
+  if (exclude.some((token) => label.includes(token))) return false;
+  return false;
 }
 
 function escapeHtml(str) {
