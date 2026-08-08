@@ -92,8 +92,9 @@ els.modelSelect.addEventListener("change", () =>
 );
 
 // Sensitivity 1..5 → thresholds. Higher = stricter (drops more as silence).
+// Level 1 is intentionally very low so weak microphones (e.g. headset) still get captured.
 const SENS_PROFILES = {
-  1: { rms: 0.008, peak: 0.035, voiced: 0.03 },
+  1: { rms: 0.004, peak: 0.018, voiced: 0.015 },
   2: { rms: 0.011, peak: 0.045, voiced: 0.045 },
   3: { rms: 0.016, peak: 0.06, voiced: 0.07 },
   4: { rms: 0.022, peak: 0.08, voiced: 0.1 },
@@ -782,7 +783,7 @@ async function startCapture(role, stream) {
       const idx = cap.chunkIndex++;
 
       // Silence gate: skip near-silent chunks so the model doesn't hallucinate.
-      if (!isSilent(chunk)) {
+      if (!isSilent(chunk, cap.role)) {
         const wav = encodeWav(chunk, audioCtx.sampleRate);
         const stats = analyzeSamples(chunk);
         sendChunk(cap.role, wav, tsAtStart, idx, stats.rms);
@@ -822,10 +823,18 @@ function flushBuffer(cap) {
 
 // Return true if the chunk is quiet enough that we treat it as silence.
 // Uses RMS + peak + "voiced ratio" (share of samples above a small floor).
-// Clicks or fan noise can push peak up while the chunk is really silent,
-// so we require a meaningful fraction of samples to be non-trivial.
-function isSilent(samples) {
+// All three metrics must be below their thresholds simultaneously to treat
+// the chunk as silence. Using OR caused weak microphones (e.g. headsets) to
+// drop valid speech when just one metric dipped slightly below the limit.
+function isSilent(samples, role) {
   const stats = analyzeSamples(samples);
+  if (stats.isSilent) {
+    console.log(
+      `[silence] role=${role} DROPPED chunk — rms=${stats.rms.toFixed(4)} (thr=${silenceProfile.rms})` +
+      ` peak=${stats.peak.toFixed(4)} (thr=${silenceProfile.peak})` +
+      ` voiced=${stats.voicedRatio.toFixed(3)} (thr=${silenceProfile.voiced})`,
+    );
+  }
   return stats.isSilent;
 }
 
@@ -843,9 +852,10 @@ function analyzeSamples(samples) {
   }
   const rms = Math.sqrt(sumSq / samples.length);
   const voicedRatio = voiced / samples.length;
-  // Thresholds come from the user-selected sensitivity profile.
+  // All three conditions must hold to consider the chunk silent.
+  // Previously used OR which incorrectly dropped speech from weak microphones.
   const isQuiet =
-    rms < silenceProfile.rms || peak < silenceProfile.peak || voicedRatio < silenceProfile.voiced;
+    rms < silenceProfile.rms && peak < silenceProfile.peak && voicedRatio < silenceProfile.voiced;
   return { rms, peak, voicedRatio, isSilent: isQuiet };
 }
 
@@ -1074,6 +1084,15 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex, audioLevel = 0) {
       // Remember tail for next chunk's context prompt.
       state.prevText[role] = text;
       addOrMergeMessage(role, tsMs, text, chunkIndex, audioLevel);
+      console.log(`[sendChunk] ✅ Принято role=${role}: "${text}"`);
+    } else {
+      if (!text) {
+        console.log(`[sendChunk] ❌ Отброшено role=${role} chunkIndex=${chunkIndex}: пустой текст (rawText="${rawText}")`);
+      } else if (isLikelyHallucination(rawText)) {
+        console.log(`[sendChunk] ❌ Отброшено role=${role} chunkIndex=${chunkIndex}: галлюцинация: "${rawText}"`);
+      } else {
+        console.log(`[sendChunk] ❌ Отброшено role=${role} chunkIndex=${chunkIndex}: мало кириллицы: "${text}"`);
+      }
     }
     return;
   }
