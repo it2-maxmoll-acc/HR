@@ -647,7 +647,7 @@ ipcMain.handle("list-sessions", async () => {
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)
-    .filter((f) => f.endsWith(".txt") && !f.endsWith(".label.txt"))
+    .filter((f) => f.endsWith(".txt") && !f.endsWith(".label.txt") && !f.endsWith(".comment.txt"))
     .map((f) => {
       const fp = path.join(dir, f);
       const stat = fs.statSync(fp);
@@ -672,6 +672,9 @@ ipcMain.handle("delete-session", async (_evt, filename) => {
   // Also remove favorite sidecar if present.
   const favFile = path.join(dir, safeFilename.replace(/\.txt$/, ".fav"));
   if (fs.existsSync(favFile)) fs.unlinkSync(favFile);
+  // Also remove comment sidecar if present.
+  const commentFile = path.join(dir, safeFilename.replace(/\.txt$/, ".comment.txt"));
+  if (fs.existsSync(commentFile)) fs.unlinkSync(commentFile);
   return { ok: true };
 });
 
@@ -712,7 +715,35 @@ ipcMain.handle("load-session", async (_evt, filename) => {
   const dir = path.join(app.getPath("userData"), "sessions");
   const fp = path.join(dir, safeFilename);
   if (!fs.existsSync(fp)) return { content: "" };
-  return { content: fs.readFileSync(fp, "utf8") };
+  const commentFile = path.join(dir, safeFilename.replace(/\.txt$/, ".comment.txt"));
+  const comment = fs.existsSync(commentFile) ? fs.readFileSync(commentFile, "utf8") : "";
+  return { content: fs.readFileSync(fp, "utf8"), comment };
+});
+
+ipcMain.handle("save-session", async (_evt, filename, content) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { ok: false, error: "Invalid filename" };
+  if (typeof content !== "string") return { ok: false, error: "Invalid content" };
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const fp = path.join(dir, safeFilename);
+  if (!fs.existsSync(fp)) return { ok: false, error: "File not found" };
+  fs.writeFileSync(fp, content, "utf8");
+  return { ok: true };
+});
+
+ipcMain.handle("save-comment", async (_evt, filename, comment) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { ok: false, error: "Invalid filename" };
+  if (typeof comment !== "string") return { ok: false, error: "Invalid comment" };
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const commentFile = path.join(dir, safeFilename.replace(/\.txt$/, ".comment.txt"));
+  if (comment.trim()) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(commentFile, comment, "utf8");
+  } else if (fs.existsSync(commentFile)) {
+    fs.unlinkSync(commentFile);
+  }
+  return { ok: true };
 });
 
 ipcMain.handle("get-app-info", () => ({

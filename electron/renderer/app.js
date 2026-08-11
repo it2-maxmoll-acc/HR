@@ -38,8 +38,14 @@ const els = {
   historyList: document.getElementById("history-list"),
   historyClose: document.getElementById("history-close"),
   historyViewer: document.getElementById("history-viewer"),
+  historyViewerTitle: document.getElementById("history-viewer-title"),
   historyViewerContent: document.getElementById("history-viewer-content"),
   historyViewerClose: document.getElementById("history-viewer-close"),
+  historyViewerSave: document.getElementById("history-viewer-save"),
+  historyViewerComment: document.getElementById("history-viewer-comment"),
+  historyMultiselectBar: document.getElementById("history-multiselect-bar"),
+  historySelectedCount: document.getElementById("history-selected-count"),
+  historyDeleteSelected: document.getElementById("history-delete-selected"),
   renameModal: document.getElementById("rename-modal"),
   renameInput: document.getElementById("rename-input"),
   renameCancel: document.getElementById("rename-cancel"),
@@ -178,6 +184,8 @@ els.overlay.addEventListener("click", () => window.api.openOverlay?.());
 els.history.addEventListener("click", openHistoryPanel);
 els.historyClose.addEventListener("click", closeHistoryPanel);
 els.historyViewerClose.addEventListener("click", () => els.historyViewer.classList.add("hidden"));
+els.historyViewerSave.addEventListener("click", saveViewerSession);
+els.historyDeleteSelected.addEventListener("click", deleteSelectedSessions);
 
 // History tabs
 document.getElementById("history-panel").addEventListener("click", (e) => {
@@ -1383,6 +1391,9 @@ async function saveTranscript(afterStop) {
 
 // -------- history panel --------
 
+// Filename of the session currently open in the viewer (for save).
+let _viewerFilename = null;
+
 async function openHistoryPanel() {
   els.historyPanel.classList.remove("hidden");
   await refreshHistoryList();
@@ -1393,8 +1404,34 @@ function closeHistoryPanel() {
   els.historyViewer.classList.add("hidden");
 }
 
+function updateMultiselectBar() {
+  const checked = els.historyList.querySelectorAll(".history-select:checked");
+  const count = checked.length;
+  if (count > 0) {
+    els.historyMultiselectBar.classList.remove("hidden");
+    els.historySelectedCount.textContent = `${count} выбрано`;
+  } else {
+    els.historyMultiselectBar.classList.add("hidden");
+  }
+}
+
+async function deleteSelectedSessions() {
+  const checked = Array.from(els.historyList.querySelectorAll(".history-select:checked"));
+  if (checked.length === 0) return;
+  if (!confirm(`Удалить ${checked.length} запис${checked.length === 1 ? "ь" : "и"}?`)) return;
+  for (const cb of checked) {
+    try {
+      await window.api.deleteSession(cb.dataset.file);
+    } catch (err) {
+      showBanner(`Не удалось удалить ${cb.dataset.file}: ${err.message}`);
+    }
+  }
+  await refreshHistoryList();
+}
+
 async function refreshHistoryList() {
   els.historyList.innerHTML = '<p class="history-loading">Загрузка…</p>';
+  els.historyMultiselectBar.classList.add("hidden");
   let sessions = [];
   try {
     sessions = await window.api.listSessions();
@@ -1417,11 +1454,8 @@ async function refreshHistoryList() {
     const row = document.createElement("div");
     row.className = "history-row";
 
-    // Format filename → readable date
     const datePart = s.filename.replace(/^session_/, "").replace(/\.txt$/, "");
-    // datePart: 2026-07-28T12-30-45 → 28.07.2026 12:30:45
     const dateLabel = formatSessionDate(datePart);
-    // Oldest record should be "Запись 1", newest should get the largest index.
     const chronologicalIndex = sessions.length - sessions.indexOf(s);
     const defaultName = `Запись ${chronologicalIndex}`;
     const displayLabel = s.label ? escapeHtml(s.label) : defaultName;
@@ -1430,6 +1464,10 @@ async function refreshHistoryList() {
     const starClass = s.favorite ? "history-star active" : "history-star";
 
     row.innerHTML =
+      `<label class="history-checkbox-wrap" title="Выбрать">` +
+      `<input type="checkbox" class="history-select" data-file="${s.filename}">` +
+      `</label>` +
+      `<div class="history-row-body">` +
       `<div class="history-info">` +
       `<div class="history-info-text">` +
       `<span class="history-name" title="${dateLabel}">${displayLabel}</span>` +
@@ -1443,15 +1481,24 @@ async function refreshHistoryList() {
       `<button class="btn ghost history-btn" data-action="view" data-file="${s.filename}">Открыть</button>` +
       `<button class="btn primary history-btn" data-action="continue" data-file="${s.filename}">Продолжить</button>` +
       `<button class="btn danger history-btn" data-action="delete" data-file="${s.filename}">Удалить</button>` +
+      `</div>` +
       `</div>`;
     els.historyList.appendChild(row);
   }
+
+  // Update multiselect bar whenever a checkbox changes.
+  els.historyList.querySelectorAll(".history-select").forEach((cb) => {
+    cb.addEventListener("change", updateMultiselectBar);
+  });
 
   els.historyList.removeEventListener("click", onHistoryAction);
   els.historyList.addEventListener("click", onHistoryAction);
 }
 
 async function onHistoryAction(e) {
+  // Don't trigger on checkbox clicks (they're handled separately).
+  if (e.target.classList.contains("history-select")) return;
+
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
   const action = btn.dataset.action;
@@ -1487,17 +1534,18 @@ async function onHistoryAction(e) {
   }
 
   let content = "";
+  let comment = "";
   try {
     const res = await window.api.loadSession(filename);
     content = res.content || "";
+    comment = res.comment || "";
   } catch (err) {
     showBanner("Не удалось открыть: " + err.message);
     return;
   }
 
   if (action === "view") {
-    els.historyViewerContent.textContent = content || "(пусто)";
-    els.historyViewer.classList.remove("hidden");
+    openViewerForSession(filename, content, comment);
     return;
   }
 
@@ -1506,7 +1554,6 @@ async function onHistoryAction(e) {
       showBanner("Сначала остановите текущую запись.");
       return;
     }
-    // Parse existing messages from file and restore them.
     const loaded = parseTranscriptContent(content);
     state.messages = loaded;
     state.nextId = loaded.length + 1;
@@ -1514,7 +1561,6 @@ async function onHistoryAction(e) {
     for (const msg of loaded) {
       renderMessage(msg);
     }
-    // Offset timer so new recording continues from where old one left off.
     const maxTs = loaded.reduce((m, msg) => Math.max(m, msg.tsMs), 0);
     state.startedAt = performance.now() - maxTs - 2000;
     _currentSessionFile = filename;
@@ -1524,6 +1570,95 @@ async function onHistoryAction(e) {
         formatSessionDate(filename.replace(/^session_|\.txt$/g, "")) +
         "». Нажмите «Начать запись».",
     );
+  }
+}
+
+// Open the editable viewer for a session.
+function openViewerForSession(filename, content, comment) {
+  _viewerFilename = filename;
+  const datePart = filename.replace(/^session_/, "").replace(/\.txt$/, "");
+  els.historyViewerTitle.textContent = `Редактирование: ${formatSessionDate(datePart)}`;
+  els.historyViewerComment.value = comment;
+
+  // Render editable lines.
+  const lines = content.split("\n");
+  const RE = /^\[(\d{2}:\d{2})\]\s+(HR|Кандидат):\s+(.*)$/;
+  els.historyViewerContent.innerHTML = "";
+  for (const line of lines) {
+    const m = line.match(RE);
+    if (!m) continue;
+    const ts = m[1];
+    const role = m[2];
+    const text = m[3];
+
+    const lineEl = document.createElement("div");
+    lineEl.className = "viewer-line";
+    lineEl.dataset.ts = ts;
+
+    const roleEl = document.createElement("select");
+    roleEl.className = `viewer-role viewer-role-${role === "HR" ? "hr" : "cand"}`;
+    ["HR", "Кандидат"].forEach((r) => {
+      const opt = document.createElement("option");
+      opt.value = r;
+      opt.textContent = r;
+      if (r === role) opt.selected = true;
+      roleEl.appendChild(opt);
+    });
+    roleEl.addEventListener("change", () => {
+      roleEl.className = `viewer-role viewer-role-${roleEl.value === "HR" ? "hr" : "cand"}`;
+    });
+
+    const tsEl = document.createElement("span");
+    tsEl.className = "viewer-ts";
+    tsEl.textContent = `[${ts}]`;
+
+    const textEl = document.createElement("textarea");
+    textEl.className = "viewer-text";
+    textEl.value = text;
+    textEl.rows = 1;
+    // Auto-resize on input.
+    textEl.addEventListener("input", () => {
+      textEl.style.height = "auto";
+      textEl.style.height = textEl.scrollHeight + "px";
+    });
+
+    lineEl.appendChild(roleEl);
+    lineEl.appendChild(tsEl);
+    lineEl.appendChild(textEl);
+    els.historyViewerContent.appendChild(lineEl);
+
+    // Trigger initial sizing.
+    setTimeout(() => {
+      textEl.style.height = "auto";
+      textEl.style.height = textEl.scrollHeight + "px";
+    }, 0);
+  }
+
+  els.historyViewer.classList.remove("hidden");
+}
+
+// Serialize viewer lines back to transcript format and save.
+async function saveViewerSession() {
+  if (!_viewerFilename) return;
+  const lines = els.historyViewerContent.querySelectorAll(".viewer-line");
+  const content = Array.from(lines)
+    .map((line) => {
+      const ts = line.dataset.ts;
+      const role = line.querySelector(".viewer-role").value;
+      const text = line.querySelector(".viewer-text").value.replace(/\n/g, " ").trim();
+      return `[${ts}] ${role}: ${text}`;
+    })
+    .join("\n");
+  const comment = els.historyViewerComment.value;
+  try {
+    await Promise.all([
+      window.api.saveSession(_viewerFilename, content),
+      window.api.saveComment(_viewerFilename, comment),
+    ]);
+    showBanner("Запись сохранена.");
+    setTimeout(hideBanner, 2500);
+  } catch (err) {
+    showBanner("Не удалось сохранить: " + err.message);
   }
 }
 

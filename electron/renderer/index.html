@@ -107,14 +107,28 @@
         <button class="history-tab active" data-tab="all">Все</button>
         <button class="history-tab" data-tab="favorites">★ Избранные</button>
       </div>
+      <!-- Multi-select toolbar (hidden until at least one item is checked) -->
+      <div id="history-multiselect-bar" class="history-multiselect-bar hidden">
+        <span id="history-selected-count">0 выбрано</span>
+        <button id="history-delete-selected" class="btn danger small">🗑 Удалить выбранные</button>
+      </div>
       <div id="history-list" class="history-list"></div>
-      <!-- Session text viewer -->
+      <!-- Session text viewer / editor -->
       <div id="history-viewer" class="history-viewer hidden">
         <div class="history-viewer-header">
-          <span>Просмотр записи</span>
-          <button id="history-viewer-close" class="btn ghost small">✕</button>
+          <span id="history-viewer-title">Просмотр записи</span>
+          <div class="history-viewer-header-actions">
+            <button id="history-viewer-save" class="btn primary small">💾 Сохранить</button>
+            <button id="history-viewer-close" class="btn ghost small">✕</button>
+          </div>
         </div>
-        <pre id="history-viewer-content" class="history-viewer-content"></pre>
+        <!-- HR comment block -->
+        <div class="history-viewer-comment-block">
+          <label class="history-viewer-comment-label" for="history-viewer-comment">Комментарий HR:</label>
+          <textarea id="history-viewer-comment" class="history-viewer-comment-textarea" placeholder="Введите комментарий к этой записи…"></textarea>
+        </div>
+        <!-- Editable transcript lines -->
+        <div id="history-viewer-content" class="history-viewer-content"></div>
       </div>
     </div>
 
