@@ -125,7 +125,9 @@ const ROLE_SENSITIVITY_SETTINGS = {
 };
 const roleSilenceProfiles = {};
 
-const legacySensitivityLevel = mapLegacySensitivityLevel(Number(localStorage.getItem("sensitivity")));
+const legacySensitivityLevel = mapLegacySensitivityLevel(
+  Number(localStorage.getItem("sensitivity")),
+);
 for (const [role, config] of Object.entries(ROLE_SENSITIVITY_SETTINGS)) {
   const level = loadStoredSensitivityLevel(config, legacySensitivityLevel);
   applySensitivityLevel(role, level);
