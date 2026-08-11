@@ -40,8 +40,14 @@
         </select>
       </label>
       <label>
-        <span>Чувствительность к тишине: <b id="sens-value">3</b> / 5</span>
-        <input id="sensitivity" type="range" min="1" max="5" step="1" value="3" />
+        <span>Чувствительность к тишине (HR): <b id="hr-sens-value">6</b> / 10</span>
+        <input id="hr-sensitivity" type="range" min="1" max="10" step="1" value="6" />
+        <small class="sensitivity-hint">Выше — строже фильтр, меньше ложных срабатываний.</small>
+      </label>
+      <label>
+        <span>Чувствительность к тишине (Кандидат): <b id="candidate-sens-value">6</b> / 10</span>
+        <input id="candidate-sensitivity" type="range" min="1" max="10" step="1" value="6" />
+        <small class="sensitivity-hint">Отдельно регулирует фильтр системного звука / loopback.</small>
       </label>
       <label class="endpoint" id="api-key-row">
         <span>OpenAI API Key</span>

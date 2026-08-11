@@ -14,6 +14,12 @@ const CROSS_ROLE_DUP_WINDOW_MS = 8000;
 const CROSS_ROLE_DUP_MIN_CHARS = 16;
 const CROSS_ROLE_DUP_MIN_WORDS = 3;
 const CROSS_ROLE_PROMOTION_RATIO = 1.35;
+const SAME_ROLE_DUP_WINDOW_MS = 45000;
+const SAME_ROLE_ECHO_WINDOW_MS = 12000;
+const SAME_ROLE_WEAKER_RATIO = 0.9;
+const SENSITIVITY_MIN_LEVEL = 1;
+const SENSITIVITY_MAX_LEVEL = 10;
+const DEFAULT_SENSITIVITY_LEVEL = 6;
 
 const els = {
   status: document.getElementById("status"),
@@ -30,8 +36,10 @@ const els = {
   download: document.getElementById("download"),
   banner: document.getElementById("banner"),
   log: document.getElementById("log"),
-  sensitivity: document.getElementById("sensitivity"),
-  sensValue: document.getElementById("sens-value"),
+  hrSensitivity: document.getElementById("hr-sensitivity"),
+  hrSensValue: document.getElementById("hr-sens-value"),
+  candidateSensitivity: document.getElementById("candidate-sensitivity"),
+  candidateSensValue: document.getElementById("candidate-sens-value"),
   overlay: document.getElementById("overlay"),
   history: document.getElementById("history"),
   historyPanel: document.getElementById("history-panel"),
@@ -98,27 +106,33 @@ els.modelSelect.addEventListener("change", () =>
   localStorage.setItem("openai-model", els.modelSelect.value),
 );
 
-// Sensitivity 1..5 → thresholds. Higher = stricter (drops more as silence).
-// Level 1 is intentionally very low so weak microphones (e.g. headset) still get captured.
-const SENS_PROFILES = {
-  1: { rms: 0.004, peak: 0.018, voiced: 0.015 },
-  2: { rms: 0.011, peak: 0.045, voiced: 0.045 },
-  3: { rms: 0.016, peak: 0.06, voiced: 0.07 },
-  4: { rms: 0.022, peak: 0.08, voiced: 0.1 },
-  5: { rms: 0.03, peak: 0.11, voiced: 0.14 },
+// Sensitivity 1..10 → thresholds. Higher = stricter (drops more as silence/noise).
+// The upper end is intentionally stricter than the old 1..5 scale so noisy
+// microphones and loopback audio can be filtered more aggressively.
+const SENSITIVITY_PROFILE_MIN = { rms: 0.004, peak: 0.018, voiced: 0.015, voiceFloor: 0.02 };
+const SENSITIVITY_PROFILE_MAX = { rms: 0.045, peak: 0.15, voiced: 0.22, voiceFloor: 0.045 };
+const ROLE_SENSITIVITY_SETTINGS = {
+  HR: {
+    input: els.hrSensitivity,
+    value: els.hrSensValue,
+    storageKey: "sensitivity-hr",
+  },
+  Кандидат: {
+    input: els.candidateSensitivity,
+    value: els.candidateSensValue,
+    storageKey: "sensitivity-candidate",
+  },
 };
-let silenceProfile = SENS_PROFILES[3];
+const roleSilenceProfiles = {};
 
-const savedSens = Number(localStorage.getItem("sensitivity")) || 3;
-els.sensitivity.value = String(savedSens);
-els.sensValue.textContent = String(savedSens);
-silenceProfile = SENS_PROFILES[savedSens] || SENS_PROFILES[3];
-els.sensitivity.addEventListener("input", () => {
-  const v = Number(els.sensitivity.value) || 3;
-  els.sensValue.textContent = String(v);
-  silenceProfile = SENS_PROFILES[v] || SENS_PROFILES[3];
-  localStorage.setItem("sensitivity", String(v));
-});
+const legacySensitivityLevel = mapLegacySensitivityLevel(Number(localStorage.getItem("sensitivity")));
+for (const [role, config] of Object.entries(ROLE_SENSITIVITY_SETTINGS)) {
+  const level = loadStoredSensitivityLevel(config, legacySensitivityLevel);
+  applySensitivityLevel(role, level);
+  config.input.addEventListener("input", () => {
+    applySensitivityLevel(role, Number(config.input.value));
+  });
+}
 
 async function refreshDevices() {
   try {
@@ -686,7 +700,9 @@ async function stop() {
       // Send remaining buffer as a final chunk.
       if (cap.buffer.length > 0) {
         const audio = flushBuffer(cap);
-        sendChunk(cap.role, audio.wav, cap.startTs, cap.chunkIndex++, audio.rms);
+        if (!isSilent(cap.role, audio.stats)) {
+          sendChunk(cap.role, audio.wav, cap.startTs, cap.chunkIndex++, audio.stats.rms);
+        }
       }
       cap.processor.disconnect();
       cap.source.disconnect();
@@ -787,14 +803,15 @@ async function startCapture(role, stream) {
     if (cap.bufferSamples >= chunkSamples) {
       const merged = mergeFloat32(cap.buffer, cap.bufferSamples);
       const chunk = merged.subarray(0, chunkSamples);
+      const profile = getSilenceProfile(cap.role);
+      const stats = analyzeSamples(chunk, profile);
 
       const tsAtStart = cap.windowStartTs;
       const idx = cap.chunkIndex++;
 
       // Silence gate: skip near-silent chunks so the model doesn't hallucinate.
-      if (!isSilent(chunk, cap.role)) {
+      if (!isSilent(cap.role, stats, profile)) {
         const wav = encodeWav(chunk, audioCtx.sampleRate);
-        const stats = analyzeSamples(chunk);
         sendChunk(cap.role, wav, tsAtStart, idx, stats.rms);
       }
 
@@ -824,9 +841,10 @@ function flushBuffer(cap) {
   cap.buffer = [];
   cap.bufferSamples = 0;
   cap.startTs = cap.windowStartTs;
+  const stats = analyzeSamples(merged, getSilenceProfile(cap.role));
   return {
     wav: encodeWav(merged, cap.audioCtx.sampleRate),
-    rms: analyzeSamples(merged).rms,
+    stats,
   };
 }
 
@@ -835,23 +853,23 @@ function flushBuffer(cap) {
 // All three metrics must be below their thresholds simultaneously to treat
 // the chunk as silence. Using OR caused weak microphones (e.g. headsets) to
 // drop valid speech when just one metric dipped slightly below the limit.
-function isSilent(samples, role) {
-  const stats = analyzeSamples(samples);
+function isSilent(role, stats, profile = getSilenceProfile(role)) {
   if (stats.isSilent) {
     console.log(
-      `[silence] role=${role} DROPPED chunk — rms=${stats.rms.toFixed(4)} (thr=${silenceProfile.rms})` +
-      ` peak=${stats.peak.toFixed(4)} (thr=${silenceProfile.peak})` +
-      ` voiced=${stats.voicedRatio.toFixed(3)} (thr=${silenceProfile.voiced})`,
+      `[silence] role=${role} DROPPED chunk — rms=${stats.rms.toFixed(4)} (thr=${profile.rms.toFixed(4)})` +
+        ` peak=${stats.peak.toFixed(4)} (thr=${profile.peak.toFixed(4)})` +
+        ` voiced=${stats.voicedRatio.toFixed(3)} (thr=${profile.voiced.toFixed(3)})` +
+        ` floor=${profile.voiceFloor.toFixed(3)}`,
     );
   }
   return stats.isSilent;
 }
 
-function analyzeSamples(samples) {
+function analyzeSamples(samples, profile) {
   let sumSq = 0;
   let peak = 0;
   let voiced = 0;
-  const voiceFloor = 0.02;
+  const voiceFloor = profile.voiceFloor;
   for (let i = 0; i < samples.length; i++) {
     const v = samples[i];
     sumSq += v * v;
@@ -863,8 +881,7 @@ function analyzeSamples(samples) {
   const voicedRatio = voiced / samples.length;
   // All three conditions must hold to consider the chunk silent.
   // Previously used OR which incorrectly dropped speech from weak microphones.
-  const isQuiet =
-    rms < silenceProfile.rms && peak < silenceProfile.peak && voicedRatio < silenceProfile.voiced;
+  const isQuiet = rms < profile.rms && peak < profile.peak && voicedRatio < profile.voiced;
   return { rms, peak, voicedRatio, isSilent: isQuiet };
 }
 
@@ -880,11 +897,13 @@ const HALLUCINATION_PHRASES = new Set([
   "no",
   "thanks",
   "thank you",
+  "okey",
   "bye",
   "meow",
   "uh",
   "um",
   "hmm",
+  "mm",
   "mhm",
   "oh",
   "wow",
@@ -898,6 +917,10 @@ const HALLUCINATION_PHRASES = new Set([
   "нет",
   "ага",
   "угу",
+  "окей",
+  "ок",
+  "эм",
+  "мм",
   "спасибо",
   "пока",
   "ой",
@@ -1019,7 +1042,7 @@ async function sendChunk(role, wavBlob, tsMs, chunkIndex, audioLevel = 0) {
     // Base instruction prompt — describes the recording situation so the model
     // transcribes verbatim without hallucinating completions or repeating words.
     const basePrompt =
-      "Это разговорная речь на русском языке. Транскрибируй дословно, без добавлений и повторений. Не заканчивай незавершённые мысли. Числа пиши цифрами. Не используй многоточие.";
+      "Это разговорная речь на русском языке. Транскрибируй дословно, без добавлений и повторений. Не заканчивай незавершённые мысли. Числа пиши цифрами. Не используй многоточие. Если речь неразборчива, слышен только шум, фоновые голоса или нет явной русской фразы — ничего не добавляй. Лучше пропусти сомнительный фрагмент, чем придумай слова.";
     // Append the tail of the previous chunk so the model understands context
     // and doesn't capitalise mid-sentence or duplicate boundary words.
     const prev = (state.prevText[role] || "").slice(-120);
@@ -1125,6 +1148,10 @@ function addMessage(role, tsMs, text, chunkIndex, audioLevel = 0) {
 function addOrMergeMessage(role, tsMs, text, chunkIndex, audioLevel = 0) {
   const dedupeResult = resolveCrossRoleDuplicate(role, tsMs, text, chunkIndex, audioLevel);
   if (dedupeResult?.handled) {
+    return;
+  }
+  const sameRoleDedupe = resolveSameRoleDuplicate(role, tsMs, text, chunkIndex, audioLevel);
+  if (sameRoleDedupe?.handled) {
     return;
   }
   const last = state.messages[state.messages.length - 1];
@@ -1261,6 +1288,32 @@ function resolveCrossRoleDuplicate(role, tsMs, text, chunkIndex, audioLevel) {
   return { handled: true };
 }
 
+function resolveSameRoleDuplicate(role, tsMs, text, chunkIndex, audioLevel) {
+  const duplicate = findSameRoleDuplicate(role, tsMs, text, audioLevel);
+  if (!duplicate) return { handled: false };
+
+  const { message, reason } = duplicate;
+  const richerText = pickRicherTranscript(message.text, text);
+  const shouldRefresh = richerText !== message.text;
+  message.text = richerText;
+  message.lastTsMs = Math.max(message.lastTsMs ?? message.tsMs, tsMs);
+  message.chunkIndex = Math.max(message.chunkIndex ?? 0, chunkIndex);
+  message.audioLevel = Math.max(message.audioLevel || 0, audioLevel);
+
+  if (shouldRefresh) {
+    updateMessage(message);
+    window.api.pushTranscriptLine?.({
+      id: message.id,
+      role: message.role,
+      tsMs: message.tsMs,
+      text: message.text,
+    });
+  }
+
+  console.warn(`[audio] Dropped repeated ${role} transcript (${reason}).`);
+  return { handled: true };
+}
+
 function findCrossRoleDuplicate(role, tsMs, text) {
   if (!isEligibleForCrossRoleDedup(text)) return null;
   for (let i = state.messages.length - 1; i >= 0; i--) {
@@ -1271,6 +1324,41 @@ function findCrossRoleDuplicate(role, tsMs, text) {
     if (areLikelySameUtterance(msg.text, text)) return msg;
   }
   return null;
+}
+
+function findSameRoleDuplicate(role, tsMs, text, audioLevel) {
+  if (!isEligibleForCrossRoleDedup(text)) return null;
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const msg = state.messages[i];
+    if (msg.role !== role) continue;
+    if (msg.text.startsWith("[")) continue;
+    const lastTs = msg.lastTsMs ?? msg.tsMs;
+    const gapMs = Math.abs(lastTs - tsMs);
+    if (gapMs > SAME_ROLE_DUP_WINDOW_MS) continue;
+    if (!areLikelySameUtterance(msg.text, text)) continue;
+
+    if (hasInterveningOtherRoleMessage(i, role)) {
+      return { message: msg, reason: "same-role echo after another speaker" };
+    }
+
+    const existingLevel = msg.audioLevel || 0;
+    if (
+      gapMs <= SAME_ROLE_ECHO_WINDOW_MS &&
+      audioLevel > 0 &&
+      existingLevel > 0 &&
+      audioLevel <= existingLevel * SAME_ROLE_WEAKER_RATIO
+    ) {
+      return { message: msg, reason: "same-role weaker echo" };
+    }
+  }
+  return null;
+}
+
+function hasInterveningOtherRoleMessage(index, role) {
+  for (let i = index + 1; i < state.messages.length; i++) {
+    if (state.messages[i].role !== role) return true;
+  }
+  return false;
 }
 
 function isEligibleForCrossRoleDedup(text) {
@@ -1357,6 +1445,57 @@ function fmtTs(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
   const m = Math.floor(s / 60);
   return String(m).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}
+
+function clampSensitivityLevel(level) {
+  const safeLevel = Number.isFinite(level) ? Math.round(level) : DEFAULT_SENSITIVITY_LEVEL;
+  return Math.min(SENSITIVITY_MAX_LEVEL, Math.max(SENSITIVITY_MIN_LEVEL, safeLevel));
+}
+
+function mapLegacySensitivityLevel(level) {
+  if (!Number.isFinite(level) || level <= 0) return DEFAULT_SENSITIVITY_LEVEL;
+  const legacyClamped = Math.min(5, Math.max(1, Math.round(level)));
+  if (legacyClamped === 3) return DEFAULT_SENSITIVITY_LEVEL;
+  return clampSensitivityLevel(
+    SENSITIVITY_MIN_LEVEL +
+      ((legacyClamped - 1) * (SENSITIVITY_MAX_LEVEL - SENSITIVITY_MIN_LEVEL)) / 4,
+  );
+}
+
+function loadStoredSensitivityLevel(config, fallbackLevel) {
+  const stored = Number(localStorage.getItem(config.storageKey));
+  if (Number.isFinite(stored) && stored > 0) return clampSensitivityLevel(stored);
+  return clampSensitivityLevel(fallbackLevel);
+}
+
+function applySensitivityLevel(role, level) {
+  const config = ROLE_SENSITIVITY_SETTINGS[role];
+  if (!config) return;
+  const safeLevel = clampSensitivityLevel(level);
+  config.input.value = String(safeLevel);
+  config.value.textContent = String(safeLevel);
+  localStorage.setItem(config.storageKey, String(safeLevel));
+  roleSilenceProfiles[role] = createSensitivityProfile(safeLevel);
+}
+
+function createSensitivityProfile(level) {
+  const t =
+    (clampSensitivityLevel(level) - SENSITIVITY_MIN_LEVEL) /
+    (SENSITIVITY_MAX_LEVEL - SENSITIVITY_MIN_LEVEL);
+  return {
+    rms: lerp(SENSITIVITY_PROFILE_MIN.rms, SENSITIVITY_PROFILE_MAX.rms, t),
+    peak: lerp(SENSITIVITY_PROFILE_MIN.peak, SENSITIVITY_PROFILE_MAX.peak, t),
+    voiced: lerp(SENSITIVITY_PROFILE_MIN.voiced, SENSITIVITY_PROFILE_MAX.voiced, t),
+    voiceFloor: lerp(SENSITIVITY_PROFILE_MIN.voiceFloor, SENSITIVITY_PROFILE_MAX.voiceFloor, t),
+  };
+}
+
+function getSilenceProfile(role) {
+  return roleSilenceProfiles[role] || createSensitivityProfile(DEFAULT_SENSITIVITY_LEVEL);
+}
+
+function lerp(from, to, ratio) {
+  return from + (to - from) * ratio;
 }
 
 // -------- save --------

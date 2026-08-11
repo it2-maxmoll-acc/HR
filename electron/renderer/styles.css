@@ -74,6 +74,11 @@ body {
   color: #9aa4af;
 }
 
+.sensitivity-hint {
+  font-size: 11px;
+  color: #6f7a87;
+}
+
 .controls .endpoint {
   grid-column: 1 / -1;
 }
