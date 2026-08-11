@@ -39,6 +39,7 @@ const els = {
   historyClose: document.getElementById("history-close"),
   historyViewer: document.getElementById("history-viewer"),
   historyViewerTitle: document.getElementById("history-viewer-title"),
+  historyViewerMeta: document.getElementById("history-viewer-meta"),
   historyViewerContent: document.getElementById("history-viewer-content"),
   historyViewerClose: document.getElementById("history-viewer-close"),
   historyViewerSave: document.getElementById("history-viewer-save"),
@@ -1478,8 +1479,8 @@ async function refreshHistoryList() {
       `<div class="history-actions">` +
       `<button class="${starClass}" data-action="favorite" data-file="${s.filename}" title="Добавить в избранное">${starLabel}</button>` +
       `<button class="btn ghost history-btn" data-action="rename" data-file="${s.filename}" data-label="${escapeHtml(s.label || "")}" data-default="${escapeHtml(defaultName)}">✏</button>` +
-      `<button class="btn ghost history-btn" data-action="view" data-file="${s.filename}">Открыть</button>` +
-      `<button class="btn primary history-btn" data-action="continue" data-file="${s.filename}">Продолжить</button>` +
+      `<button class="btn ghost history-btn" data-action="view" data-file="${s.filename}" data-title="${displayLabel}" data-date="${dateLabel}">Открыть</button>` +
+      `<button class="btn primary history-btn" data-action="continue" data-file="${s.filename}" data-title="${displayLabel}" data-date="${dateLabel}">Продолжить</button>` +
       `<button class="btn danger history-btn" data-action="delete" data-file="${s.filename}">Удалить</button>` +
       `</div>` +
       `</div>`;
@@ -1545,7 +1546,7 @@ async function onHistoryAction(e) {
   }
 
   if (action === "view") {
-    openViewerForSession(filename, content, comment);
+    openViewerForSession(filename, content, comment, btn.dataset.title, btn.dataset.date);
     return;
   }
 
@@ -1566,18 +1567,22 @@ async function onHistoryAction(e) {
     _currentSessionFile = filename;
     closeHistoryPanel();
     showBanner(
-      "Продолжение записи «" +
-        formatSessionDate(filename.replace(/^session_|\.txt$/g, "")) +
-        "». Нажмите «Начать запись».",
+      `Продолжение записи «${btn.dataset.title || btn.dataset.date || filename}». Нажмите «Начать запись».`,
     );
   }
 }
 
 // Open the editable viewer for a session.
-function openViewerForSession(filename, content, comment) {
+function openViewerForSession(filename, content, comment, title, dateLabel) {
   _viewerFilename = filename;
-  const datePart = filename.replace(/^session_/, "").replace(/\.txt$/, "");
-  els.historyViewerTitle.textContent = `Редактирование: ${formatSessionDate(datePart)}`;
+  els.historyViewerTitle.textContent = title || filename;
+  if (dateLabel) {
+    els.historyViewerMeta.textContent = dateLabel;
+    els.historyViewerMeta.classList.remove("hidden");
+  } else {
+    els.historyViewerMeta.textContent = "";
+    els.historyViewerMeta.classList.add("hidden");
+  }
   els.historyViewerComment.value = comment;
 
   // Render editable lines.

@@ -367,11 +367,43 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid #1e232a;
-  font-weight: 600;
-  font-size: 13px;
   flex-shrink: 0;
+}
+
+.history-viewer-heading {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.history-viewer-caption {
+  font-size: 11px;
+  font-weight: 600;
+  color: #7a8898;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.history-viewer-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f6b94d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-viewer-meta {
+  font-size: 12px;
+  color: #8e98a6;
+}
+
+.history-viewer-meta.hidden {
+  display: none;
 }
 
 .history-viewer-content {
@@ -475,6 +507,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 /* ---- Editable transcript lines ---- */
