@@ -149,6 +149,12 @@ Main-процесс регистрирует `setDisplayMediaRequestHandler` и 
 в renderer сразу возвращает loopback-поток без выбора окна.
 На старых Electron падает fallback через `desktopCapturer`.
 
+Потоки захвата в renderer прогоняются через `MediaStreamDestination`, а не
+через реальный `audioCtx.destination`: это позволяет `ScriptProcessor` получать
+аудио для транскрибации, не открывая заново системный вывод. На некоторых
+Windows-драйверах подключение capture-графа к реальному output-у временно
+глушило звук в наушниках HR, хотя сама транскрибация продолжала работать.
+
 ## Требования
 
 - Windows 10/11

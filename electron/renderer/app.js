@@ -785,6 +785,7 @@ async function startCapture(role, stream) {
     audioCtx,
     source,
     processor,
+    processingSink: null,
     buffer: [],
     bufferSamples: 0,
     chunkIndex: 0,
@@ -825,15 +826,14 @@ async function startCapture(role, stream) {
     }
   };
 
-  // Route through a silent gain node (gain=0) so onaudioprocess fires but
-  // no audio is played back through the speakers. Playing mic audio back
-  // through the speakers would be captured by the system loopback (Кандидат)
-  // stream, causing the candidate's transcription to be duplicated under HR.
-  const silentSink = audioCtx.createGain();
-  silentSink.gain.value = 0;
+  // Route into a MediaStreamDestination instead of the real output device so
+  // onaudioprocess keeps firing without opening or reconfiguring the user's
+  // speakers/headphones. Some Windows drivers can briefly steal/mute playback
+  // when a live AudioContext is connected to audioCtx.destination.
+  const processingSink = audioCtx.createMediaStreamDestination();
   source.connect(processor);
-  processor.connect(silentSink);
-  silentSink.connect(audioCtx.destination);
+  processor.connect(processingSink);
+  cap.processingSink = processingSink;
 
   state.captures.push(cap);
 }
