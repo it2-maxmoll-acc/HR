@@ -350,29 +350,86 @@ async function configureProxy(sess) {
     );
     console.error(`[proxy] OpenAI route probe failed: ${detail || "<unknown>"}`);
 
-    // If proxy route is invalid/unusable inside Chromium, try DIRECT as a
-    // fallback, but keep it ONLY when direct route is actually reachable AND
-    // not geo-blocked (HTTP 403 "Country not supported" means the API server is
-    // reachable but the request is rejected — that is not a working fallback).
-    if (
+    const isProxyIncompatible =
       normalized.includes("ERR_NO_SUPPORTED_PROXIES")
       || normalized.includes("ERR_PROXY")
       || normalized.includes("ERR_TUNNEL_CONNECTION_FAILED")
-      || normalized.includes("ERR_SOCKS_CONNECTION_FAILED")
-    ) {
+      || normalized.includes("ERR_SOCKS_CONNECTION_FAILED");
+
+    // Step 1: If socks5 gives ERR_NO_SUPPORTED_PROXIES, auto-retry with socks5h://
+    // (socks5h delegates hostname resolution to the proxy server, which avoids
+    // ERR_NO_SUPPORTED_PROXIES that Chromium can raise for socks5:// in some
+    // configurations — e.g. when the proxy requires auth or has DNS restrictions).
+    let resolvedViaAltProtocol = false;
+    if (normalized.includes("ERR_NO_SUPPORTED_PROXIES") && protocol === "socks5") {
+      const socks5hRules = (isSocks && username)
+        ? `socks5h://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`
+        : `socks5h://${host}:${port}`;
+      console.warn(
+        "[proxy] ERR_NO_SUPPORTED_PROXIES via socks5:// — retrying with socks5h:// (remote DNS). " +
+          "Tip: set \"protocol\": \"socks5h\" in your proxy config to avoid this retry at startup.",
+      );
+      await sess.setProxy({ proxyRules: socks5hRules, proxyBypassRules });
+      const socks5hProbe = await probeOpenAiThroughSession(sess);
+      console.log(
+        `[proxy] socks5h probe: success=${socks5hProbe.success} durationMs=${socks5hProbe.durationMs} detail=${socks5hProbe.detail || "<none>"}`,
+      );
+      if (socks5hProbe.success) {
+        proxyDiagnostics.proxyRules = `socks5h://${host}:${port}`;
+        proxyDiagnostics.protocol = "socks5h";
+        proxyDiagnostics.openAiProbe = socks5hProbe;
+        resolvedViaAltProtocol = true;
+        proxyDiagnostics.warnings.push(
+          "socks5:// gave ERR_NO_SUPPORTED_PROXIES; switched to socks5h:// (remote DNS) automatically. " +
+            "Set \"protocol\": \"socks5h\" in proxy config to avoid this retry at startup.",
+        );
+        console.warn("[proxy] socks5h:// probe succeeded — using socks5h for remote DNS resolution.");
+      } else {
+        // socks5h also failed — restore original rules and fall through to DIRECT logic
+        await sess.setProxy({ proxyRules, proxyBypassRules });
+        proxyDiagnostics.warnings.push(
+          `socks5h:// retry also failed (${socks5hProbe.detail || "<unknown>"}). ` +
+            "Verify that the SOCKS5 proxy is accessible and that credentials (username/password) " +
+            "are correct in proxy config. Try protocol=socks5h explicitly if the proxy needs remote DNS.",
+        );
+        console.warn(`[proxy] socks5h:// also failed: ${socks5hProbe.detail || "<unknown>"}`);
+      }
+    }
+
+    // Step 2: If proxy route is invalid/unusable inside Chromium, try DIRECT.
+    // With autoDirectFallback=true the app switches to DIRECT even when the
+    // direct probe returns HTTP 403 (geo-blocked) — this is useful when the
+    // user has a system-level VPN active that bypasses geo-restrictions but the
+    // probe ran before the VPN was established (or Chromium probed before VPN
+    // routing kicked in).
+    if (!resolvedViaAltProtocol && isProxyIncompatible) {
       await sess.setProxy({ mode: "direct" });
       proxyDiagnostics.directProbe = await probeOpenAiThroughSession(sess);
       const directOk = proxyDiagnostics.directProbe.success
         && proxyDiagnostics.directProbe.statusCode !== 403;
-      if (directOk) {
+      const autoFallback = Boolean(cfg.autoDirectFallback);
+
+      if (directOk || autoFallback) {
         proxyDiagnostics.directFallbackApplied = true;
-        proxyDiagnostics.warnings.push(
-          "Proxy route failed in Chromium; applied DIRECT fallback automatically.",
-        );
+        if (autoFallback && !directOk) {
+          proxyDiagnostics.warnings.push(
+            "Proxy route failed; DIRECT probe returned " +
+              `${proxyDiagnostics.directProbe.detail || "<unknown>"}. ` +
+              "Switching to DIRECT mode (autoDirectFallback=true) — " +
+              "VPN will provide geo-bypass at request time.",
+          );
+          console.warn(
+            "[proxy] autoDirectFallback: keeping DIRECT despite probe result — VPN expected to route traffic.",
+          );
+        } else {
+          proxyDiagnostics.warnings.push(
+            "Proxy route failed in Chromium; applied DIRECT fallback automatically.",
+          );
+          console.warn("[proxy] Applied DIRECT fallback after proxy probe failure.");
+        }
         try {
           proxyDiagnostics.resolvedProxy = await sess.resolveProxy(PROXY_PROBE_URL);
         } catch {}
-        console.warn("[proxy] Applied DIRECT fallback after proxy probe failure.");
       } else {
         const directReason = proxyDiagnostics.directProbe.statusCode === 403
           ? "geo-blocked (HTTP 403 Country not supported)"
@@ -382,7 +439,9 @@ async function configureProxy(sess) {
           proxyBypassRules,
         });
         proxyDiagnostics.warnings.push(
-          `DIRECT fallback not usable (${directReason}); keeping configured proxy route.`,
+          `DIRECT fallback not usable (${directReason}); keeping configured proxy route. ` +
+            "If you have a system VPN, enable \"Авто (VPN)\" in the app or set " +
+            "\"autoDirectFallback\": true in proxy config.",
         );
         console.warn(`[proxy] DIRECT fallback not usable (${directReason}); restored configured proxy route.`);
         try {
@@ -421,6 +480,7 @@ function sanitizeProxyConfig(cfg) {
     username: String(cfg.username || ""),
     hasPassword: Boolean(String(cfg.password || "")),
     bypassCount: Array.isArray(cfg.bypass) ? cfg.bypass.length : 0,
+    autoDirectFallback: Boolean(cfg.autoDirectFallback),
   };
 }
 
@@ -587,11 +647,15 @@ ipcMain.handle("list-sessions", async () => {
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)
-    .filter((f) => f.endsWith(".txt"))
+    .filter((f) => f.endsWith(".txt") && !f.endsWith(".label.txt") && !f.endsWith(".comment.txt"))
     .map((f) => {
       const fp = path.join(dir, f);
       const stat = fs.statSync(fp);
-      return { filename: f, size: stat.size, mtime: stat.mtimeMs };
+      const labelFile = path.join(dir, f.replace(/\.txt$/, ".label.txt"));
+      const label = fs.existsSync(labelFile) ? fs.readFileSync(labelFile, "utf8").trim() : "";
+      const favFile = path.join(dir, f.replace(/\.txt$/, ".fav"));
+      const favorite = fs.existsSync(favFile);
+      return { filename: f, size: stat.size, mtime: stat.mtimeMs, label, favorite };
     })
     .sort((a, b) => b.mtime - a.mtime);
 });
@@ -602,7 +666,47 @@ ipcMain.handle("delete-session", async (_evt, filename) => {
   const dir = path.join(app.getPath("userData"), "sessions");
   const fp = path.join(dir, safeFilename);
   if (fs.existsSync(fp)) fs.unlinkSync(fp);
+  // Also remove label sidecar if present.
+  const labelFile = path.join(dir, safeFilename.replace(/\.txt$/, ".label.txt"));
+  if (fs.existsSync(labelFile)) fs.unlinkSync(labelFile);
+  // Also remove favorite sidecar if present.
+  const favFile = path.join(dir, safeFilename.replace(/\.txt$/, ".fav"));
+  if (fs.existsSync(favFile)) fs.unlinkSync(favFile);
+  // Also remove comment sidecar if present.
+  const commentFile = path.join(dir, safeFilename.replace(/\.txt$/, ".comment.txt"));
+  if (fs.existsSync(commentFile)) fs.unlinkSync(commentFile);
   return { ok: true };
+});
+
+ipcMain.handle("rename-session", async (_evt, filename, label) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { ok: false, error: "Invalid filename" };
+  if (typeof label !== "string") return { ok: false, error: "Invalid label" };
+  const safeLabel = label.slice(0, 200).replace(/[\r\n]/g, " ");
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const labelFile = path.join(dir, safeFilename.replace(/\.txt$/, ".label.txt"));
+  if (safeLabel) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(labelFile, safeLabel, "utf8");
+  } else if (fs.existsSync(labelFile)) {
+    fs.unlinkSync(labelFile);
+  }
+  return { ok: true };
+});
+
+ipcMain.handle("toggle-favorite", async (_evt, filename) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { ok: false, error: "Invalid filename" };
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const favFile = path.join(dir, safeFilename.replace(/\.txt$/, ".fav"));
+  if (fs.existsSync(favFile)) {
+    fs.unlinkSync(favFile);
+    return { ok: true, favorite: false };
+  } else {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(favFile, "", "utf8");
+    return { ok: true, favorite: true };
+  }
 });
 
 ipcMain.handle("load-session", async (_evt, filename) => {
@@ -611,7 +715,35 @@ ipcMain.handle("load-session", async (_evt, filename) => {
   const dir = path.join(app.getPath("userData"), "sessions");
   const fp = path.join(dir, safeFilename);
   if (!fs.existsSync(fp)) return { content: "" };
-  return { content: fs.readFileSync(fp, "utf8") };
+  const commentFile = path.join(dir, safeFilename.replace(/\.txt$/, ".comment.txt"));
+  const comment = fs.existsSync(commentFile) ? fs.readFileSync(commentFile, "utf8") : "";
+  return { content: fs.readFileSync(fp, "utf8"), comment };
+});
+
+ipcMain.handle("save-session", async (_evt, filename, content) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { ok: false, error: "Invalid filename" };
+  if (typeof content !== "string") return { ok: false, error: "Invalid content" };
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const fp = path.join(dir, safeFilename);
+  if (!fs.existsSync(fp)) return { ok: false, error: "File not found" };
+  fs.writeFileSync(fp, content, "utf8");
+  return { ok: true };
+});
+
+ipcMain.handle("save-comment", async (_evt, filename, comment) => {
+  const safeFilename = sanitizeSessionFilename(filename);
+  if (!safeFilename) return { ok: false, error: "Invalid filename" };
+  if (typeof comment !== "string") return { ok: false, error: "Invalid comment" };
+  const dir = path.join(app.getPath("userData"), "sessions");
+  const commentFile = path.join(dir, safeFilename.replace(/\.txt$/, ".comment.txt"));
+  if (comment.trim()) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(commentFile, comment, "utf8");
+  } else if (fs.existsSync(commentFile)) {
+    fs.unlinkSync(commentFile);
+  }
+  return { ok: true };
 });
 
 ipcMain.handle("get-app-info", () => ({
@@ -698,6 +830,36 @@ ipcMain.handle("toggle-proxy", async (_evt, enable) => {
   _persistProxyEnabled(true);
   console.log(`[proxy] Toggled ON by user: ${proxyRulesForDisplay}`);
   return { ok: true, runtimeEnabled: true };
+});
+
+// Update individual fields in the on-disk proxy config (e.g. autoDirectFallback).
+// Also syncs _lastRawProxyConfig so the runtime toggle reflects the change.
+ipcMain.handle("update-proxy-config", (_evt, updates) => {
+  try {
+    const userDataConfigPath = path.join(app.getPath("userData"), "proxy.config.json");
+    if (!fs.existsSync(userDataConfigPath)) {
+      return { ok: false, error: "Proxy config file not found at " + userDataConfigPath };
+    }
+    const raw = readJsonIfExists(userDataConfigPath);
+    if (!raw || typeof raw !== "object") {
+      return { ok: false, error: "Invalid proxy config JSON." };
+    }
+    const allowed = ["autoDirectFallback", "enabled", "protocol"];
+    for (const [key, value] of Object.entries(updates || {})) {
+      if (allowed.includes(key)) raw[key] = value;
+    }
+    fs.writeFileSync(userDataConfigPath, JSON.stringify(raw, null, 2), "utf8");
+    if (_lastRawProxyConfig) {
+      for (const [key, value] of Object.entries(updates || {})) {
+        if (allowed.includes(key)) _lastRawProxyConfig[key] = value;
+      }
+    }
+    // Refresh the sanitized snapshot in diagnostics so the renderer gets the new value.
+    proxyDiagnostics.selectedConfig = sanitizeProxyConfig(_lastRawProxyConfig);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
 });
 
 // -------- secure API key storage --------

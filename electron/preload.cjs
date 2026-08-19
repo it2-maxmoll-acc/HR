@@ -15,11 +15,16 @@ contextBridge.exposeInMainWorld("api", {
   },
   getProxyDiagnostics: () => ipcRenderer.invoke("get-proxy-diagnostics"),
   toggleProxy: (enable) => ipcRenderer.invoke("toggle-proxy", enable),
+  updateProxyConfig: (updates) => ipcRenderer.invoke("update-proxy-config", updates),
 
   // Session history
   listSessions: () => ipcRenderer.invoke("list-sessions"),
   deleteSession: (filename) => ipcRenderer.invoke("delete-session", filename),
+  renameSession: (filename, label) => ipcRenderer.invoke("rename-session", filename, label),
+  toggleFavorite: (filename) => ipcRenderer.invoke("toggle-favorite", filename),
   loadSession: (filename) => ipcRenderer.invoke("load-session", filename),
+  saveSession: (filename, content) => ipcRenderer.invoke("save-session", filename, content),
+  saveComment: (filename, comment) => ipcRenderer.invoke("save-comment", filename, comment),
 
   // Secure API key storage (uses OS keychain via Electron safeStorage)
   storeApiKey: (key) => ipcRenderer.invoke("store-api-key", key),

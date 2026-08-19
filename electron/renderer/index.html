@@ -22,24 +22,32 @@
     <section class="controls">
       <label>
         <span>Микрофон (HR)</span>
-        <select id="mic-select"></select>
+        <div class="mic-row">
+          <select id="mic-select"></select>
+          <button id="mic-test" class="btn ghost small" type="button" title="Проверить микрофон">
+            🎙 Тест
+          </button>
+        </div>
+        <div id="mic-meter-wrap" class="mic-meter-wrap hidden">
+          <div id="mic-meter-bar" class="mic-meter-bar"></div>
+          <span id="mic-meter-label" class="mic-meter-label">0%</span>
+        </div>
       </label>
       <label>
-        <span>Системный звук (Кандидат)</span>
+        <span>Кандидат (звук из Windows / loopback)</span>
         <select id="sys-select">
-          <option value="loopback">Системный звук (весь ПК)</option>
+          <option value="loopback">Звук из Windows (loopback, всё что воспроизводит ПК)</option>
         </select>
       </label>
       <label>
-        <span>Чувствительность к тишине: <b id="sens-value">3</b> / 5</span>
-        <input
-          id="sensitivity"
-          type="range"
-          min="1"
-          max="5"
-          step="1"
-          value="3"
-        />
+        <span>Чувствительность к тишине (HR): <b id="hr-sens-value">6</b> / 10</span>
+        <input id="hr-sensitivity" type="range" min="1" max="10" step="1" value="6" />
+        <small class="sensitivity-hint">Выше — строже фильтр, меньше ложных срабатываний.</small>
+      </label>
+      <label>
+        <span>Чувствительность к тишине (Кандидат): <b id="candidate-sens-value">6</b> / 10</span>
+        <input id="candidate-sensitivity" type="range" min="1" max="10" step="1" value="6" />
+        <small class="sensitivity-hint">Отдельно регулирует фильтр системного звука / loopback.</small>
       </label>
       <label class="endpoint" id="api-key-row">
         <span>OpenAI API Key</span>
@@ -55,7 +63,7 @@
         <span>Модель транскрипции</span>
         <select id="model-select">
           <option value="whisper-1">whisper-1 (быстро, без лимитов)</option>
-          <option value="gpt-4o-transcribe">gpt-4o-transcribe (точнее)</option>
+          <option value="gpt-4o-transcribe" selected>gpt-4o-transcribe (точнее)</option>
           <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe (баланс)</option>
         </select>
       </label>
@@ -66,6 +74,14 @@
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
         <span id="proxy-status-text" class="proxy-status-text">загрузка…</span>
+        <label
+          class="proxy-auto-label hidden"
+          id="proxy-auto-fallback-row"
+          title="Если прокси не работает — автоматически переключиться на прямое подключение. Включите при использовании системного VPN (WireGuard, OpenVPN и др.)"
+        >
+          <input type="checkbox" id="proxy-auto-fallback" />
+          <span class="proxy-auto-text">Авто (VPN)</span>
+        </label>
       </div>
       <div class="buttons">
         <button id="start" class="btn primary">▶ Начать запись</button>
@@ -82,9 +98,7 @@
 
     <div class="log-header">
       <span>Расшифровка</span>
-      <button id="download" class="btn download" disabled>
-        ⬇ Скачать .txt
-      </button>
+      <button id="download" class="btn download" disabled>⬇ Скачать .txt</button>
     </div>
 
     <main id="log" class="log" aria-live="polite"></main>
@@ -95,14 +109,36 @@
         <span>История записей</span>
         <button id="history-close" class="btn ghost small">✕ Закрыть</button>
       </div>
+      <div class="history-tabs">
+        <button class="history-tab active" data-tab="all">Все</button>
+        <button class="history-tab" data-tab="favorites">★ Избранные</button>
+      </div>
+      <!-- Multi-select toolbar (hidden until at least one item is checked) -->
+      <div id="history-multiselect-bar" class="history-multiselect-bar hidden">
+        <span id="history-selected-count">0 выбрано</span>
+        <button id="history-delete-selected" class="btn danger small">🗑 Удалить выбранные</button>
+      </div>
       <div id="history-list" class="history-list"></div>
-      <!-- Session text viewer -->
+      <!-- Session text viewer / editor -->
       <div id="history-viewer" class="history-viewer hidden">
         <div class="history-viewer-header">
-          <span>Просмотр записи</span>
-          <button id="history-viewer-close" class="btn ghost small">✕</button>
+          <div class="history-viewer-heading">
+            <span class="history-viewer-caption">Просмотр записи</span>
+            <span id="history-viewer-title" class="history-viewer-title">Название записи</span>
+            <span id="history-viewer-meta" class="history-viewer-meta hidden"></span>
+          </div>
+          <div class="history-viewer-header-actions">
+            <button id="history-viewer-save" class="btn primary small">💾 Сохранить</button>
+            <button id="history-viewer-close" class="btn ghost small">✕</button>
+          </div>
         </div>
-        <pre id="history-viewer-content" class="history-viewer-content"></pre>
+        <!-- HR comment block -->
+        <div class="history-viewer-comment-block">
+          <label class="history-viewer-comment-label" for="history-viewer-comment">Комментарий HR:</label>
+          <textarea id="history-viewer-comment" class="history-viewer-comment-textarea" placeholder="Введите комментарий к этой записи…"></textarea>
+        </div>
+        <!-- Editable transcript lines -->
+        <div id="history-viewer-content" class="history-viewer-content"></div>
       </div>
     </div>
 
@@ -110,7 +146,7 @@
     <div id="logs-panel" class="history-panel hidden">
       <div class="history-header">
         <span>Системные логи</span>
-        <div style="display:flex;gap:8px">
+        <div style="display: flex; gap: 8px">
           <button id="logs-copy" class="btn ghost small">📋 Копировать</button>
           <button id="logs-clear" class="btn ghost small">🗑 Очистить</button>
           <button id="logs-close" class="btn ghost small">✕ Закрыть</button>
@@ -120,5 +156,23 @@
     </div>
 
     <script type="module" src="app.js"></script>
+
+    <!-- ====== Rename modal ====== -->
+    <div id="rename-modal" class="rename-modal hidden">
+      <div class="rename-modal-box">
+        <p class="rename-modal-title">Название записи</p>
+        <input
+          id="rename-input"
+          class="rename-input"
+          type="text"
+          maxlength="200"
+          placeholder="Введите название…"
+        />
+        <div class="rename-modal-actions">
+          <button id="rename-cancel" class="btn ghost small">Отмена</button>
+          <button id="rename-confirm" class="btn primary small">Сохранить</button>
+        </div>
+      </div>
+    </div>
   </body>
 </html>
