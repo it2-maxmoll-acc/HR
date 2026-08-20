@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld("api", {
   storeApiKey: (key) => ipcRenderer.invoke("store-api-key", key),
   loadApiKey: () => ipcRenderer.invoke("load-api-key"),
 
+  // OpenAI config file (openai.config.json in userData)
+  loadOpenAIConfig: () => ipcRenderer.invoke("load-openai-config"),
+  saveOpenAIConfig: (cfg) => ipcRenderer.invoke("save-openai-config", cfg),
+
   // Overlay window
   openOverlay: () => ipcRenderer.invoke("open-overlay"),
   pushTranscriptLine: (msg) => ipcRenderer.invoke("push-transcript-line", msg),

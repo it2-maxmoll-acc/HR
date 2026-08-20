@@ -94,11 +94,46 @@ let _autosaveInterval = null;
 
 // -------- init --------
 
-// Load API key from secure (OS-encrypted) storage.
-window.api.loadApiKey?.().then((key) => {
-  if (key) els.apiKey.value = key;
-});
-els.apiKey.addEventListener("change", () => window.api.storeApiKey?.(els.apiKey.value.trim()));
+// Load API key from openai.config.json (config file) or fall back to
+// the legacy safeStorage key so existing users are not broken.
+let _openaiApiKey = "";
+let _openaiConfigPath = "";
+(async () => {
+  try {
+    const cfg = await window.api.loadOpenAIConfig?.();
+    if (cfg?.apiKey) {
+      _openaiApiKey = cfg.apiKey.trim();
+      _openaiConfigPath = cfg.configPath || "";
+      // Mirror into the legacy UI field so users can still see/edit it there
+      // while the field is visible (fallback for power users).
+      if (els.apiKey) els.apiKey.value = _openaiApiKey;
+    } else {
+      // Fall back to old safeStorage key (migration path).
+      const legacy = await window.api.loadApiKey?.();
+      if (legacy) {
+        _openaiApiKey = legacy.trim();
+        if (els.apiKey) els.apiKey.value = _openaiApiKey;
+      }
+    }
+  } catch (e) {
+    console.warn("[apikey] Failed to load OpenAI config:", e);
+    // Last-resort: try legacy safeStorage
+    const legacy = await window.api.loadApiKey?.().catch(() => "");
+    if (legacy) {
+      _openaiApiKey = legacy.trim();
+      if (els.apiKey) els.apiKey.value = _openaiApiKey;
+    }
+  }
+})();
+
+// Keep in-memory key in sync when user edits the field (legacy/fallback UI).
+if (els.apiKey) {
+  els.apiKey.addEventListener("change", () => {
+    _openaiApiKey = els.apiKey.value.trim();
+    window.api.storeApiKey?.(_openaiApiKey);
+    window.api.saveOpenAIConfig?.({ apiKey: _openaiApiKey });
+  });
+}
 
 const savedModel = localStorage.getItem("openai-model") || "gpt-4o-transcribe";
 els.modelSelect.value = savedModel;
@@ -180,6 +215,20 @@ async function refreshDevices() {
       localStorage.setItem("sys-source", "loopback");
     }
     if (probe) probe.getTracks().forEach((t) => t.stop());
+
+    // On Windows, connecting AirPods (or any Bluetooth HFP headset) can hide
+    // the built-in laptop microphone — all enumerated mics appear as Bluetooth
+    // variants. Warn the user so they know to disconnect the headset first or
+    // use it specifically as a recording device.
+    const labeledMics = mics.filter((m) => m.label);
+    if (labeledMics.length > 0 && labeledMics.every((m) => isBluetoothMic(m))) {
+      showBanner(
+        "⚠️ Обнаружены только Bluetooth-микрофоны (возможно AirPods). " +
+          "Встроенный микрофон ноутбука скрыт Windows. " +
+          "Чтобы увидеть микрофон ноутбука, временно отключите Bluetooth-наушники — " +
+          "или используйте текущий микрофон (запись будет работать, но звук в наушниках может пропасть).",
+      );
+    }
   } catch (e) {
     showBanner("Не удалось получить список микрофонов: " + e.message);
   }
@@ -1019,9 +1068,13 @@ function _sleep(ms) {
 
 async function sendChunk(role, wavBlob, tsMs, chunkIndex, audioLevel = 0) {
   const model = els.modelSelect.value || "whisper-1";
-  const apiKey = (els.apiKey.value || "").trim();
+  const apiKey = (_openaiApiKey || (els.apiKey?.value || "")).trim();
   if (!apiKey) {
-    showBanner("Введите OpenAI API Key в поле выше, затем начните запись снова.");
+    showBanner(
+      _openaiConfigPath
+        ? `Добавьте OpenAI API Key в файл: ${_openaiConfigPath}`
+        : "Введите OpenAI API Key в поле выше, затем начните запись снова.",
+    );
     return;
   }
 
@@ -1867,6 +1920,26 @@ function formatSessionStamp(date) {
     parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]),
   );
   return `${map.year}-${map.month}-${map.day}-${map.hour}-${map.minute}-${map.second}`;
+}
+
+// Returns true if the device label suggests a Bluetooth headset/earbuds mic.
+// On Windows, connecting AirPods can cause ALL enumerated microphones to be
+// Bluetooth variants — the built-in mic is hidden until the Bluetooth device
+// is disconnected. This helper lets us warn the user about that.
+function isBluetoothMic(device) {
+  const label = String(device?.label || "").toLowerCase();
+  if (!label) return false;
+  const btTokens = [
+    "airpod",
+    "bluetooth",
+    "handsfree",
+    "hands-free",
+    "hfp",
+    "headset",
+    "беспровод",
+    "блютус",
+  ];
+  return btTokens.some((t) => label.includes(t));
 }
 
 function isLikelyLoopbackInput(device) {

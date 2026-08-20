@@ -862,6 +862,49 @@ ipcMain.handle("update-proxy-config", (_evt, updates) => {
   }
 });
 
+// -------- OpenAI config file (openai.config.json in userData) --------
+
+function getOpenAIConfigPath() {
+  return path.join(app.getPath("userData"), "openai.config.json");
+}
+
+function ensureOpenAIConfig() {
+  const fp = getOpenAIConfigPath();
+  if (!fs.existsSync(fp)) {
+    const bundledExample = path.join(__dirname, "openai.config.example.json");
+    if (fs.existsSync(bundledExample)) {
+      fs.copyFileSync(bundledExample, fp);
+    } else {
+      fs.writeFileSync(fp, JSON.stringify({ apiKey: "" }, null, 2), "utf8");
+    }
+  }
+}
+
+ipcMain.handle("load-openai-config", () => {
+  try {
+    ensureOpenAIConfig();
+    const fp = getOpenAIConfigPath();
+    const raw = fs.readFileSync(fp, "utf8");
+    const cfg = JSON.parse(raw);
+    return { apiKey: cfg.apiKey || "", configPath: fp };
+  } catch (e) {
+    return { apiKey: "", configPath: getOpenAIConfigPath(), error: e?.message };
+  }
+});
+
+ipcMain.handle("save-openai-config", (_evt, cfg) => {
+  try {
+    const fp = getOpenAIConfigPath();
+    const existing = fs.existsSync(fp)
+      ? JSON.parse(fs.readFileSync(fp, "utf8"))
+      : {};
+    fs.writeFileSync(fp, JSON.stringify({ ...existing, ...cfg }, null, 2), "utf8");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e?.message };
+  }
+});
+
 // -------- secure API key storage --------
 
 function getApiKeyPath() {
